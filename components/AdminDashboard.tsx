@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, Exam } from '../types';
-import { getTeachers, toggleTeacherPermission, getAllExams, deleteExam } from '../services/examService';
+import { getTeachers, toggleTeacherPermission, getAllExams, deleteExam, deleteTeacher } from '../services/examService';
 import Header from './common/Header';
 import Card from './common/Card';
 import Button from './common/Button';
@@ -38,6 +38,16 @@ const AdminDashboard: React.FC = () => {
     const handlePermissionToggle = async (teacherId: string) => {
         await toggleTeacherPermission(teacherId);
         fetchTeachers(); // Refresh the list
+    };
+    
+    const handleDeleteTeacher = async (teacherId: string, teacherName: string) => {
+        if (window.confirm(`Are you sure you want to permanently delete the account for "${teacherName}"? This action cannot be undone and will also delete all exams created by this teacher.`)) {
+            const success = await deleteTeacher(teacherId);
+            if (success) {
+                fetchTeachers(); // Refresh the teacher list
+                fetchExams(); // Also refresh the exam list
+            }
+        }
     };
 
     const handleDeleteExam = async (examId: string) => {
@@ -148,7 +158,7 @@ const AdminDashboard: React.FC = () => {
                         ) : (
                             <div className="space-y-4">
                                 {teachers.map(teacher => (
-                                    <div key={teacher.id} className="flex items-center justify-between p-4 bg-slate-100 rounded-lg">
+                                    <div key={teacher.id} className="group flex items-center justify-between p-4 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
                                         <div className="flex items-center">
                                             <UserIcon />
                                             <div className="ml-4">
@@ -156,15 +166,23 @@ const AdminDashboard: React.FC = () => {
                                                 <p className="text-sm text-slate-500">{teacher.email}</p>
                                             </div>
                                         </div>
-                                        <div className="flex items-center space-x-4">
+                                        <div className="flex items-center space-x-3">
                                              <span className={`text-sm font-medium px-2 py-1 rounded-full ${teacher.permissionGranted ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                                 {teacher.permissionGranted ? 'Permission Granted' : 'Permission Revoked'}
                                             </span>
                                             <Button 
                                                 variant={teacher.permissionGranted ? 'danger' : 'primary'}
+                                                className="!py-1 !px-3 text-xs"
                                                 onClick={() => handlePermissionToggle(teacher.id)}
                                             >
                                                 {teacher.permissionGranted ? 'Revoke' : 'Grant'}
+                                            </Button>
+                                            <Button 
+                                                variant="danger" 
+                                                className="!py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                                                onClick={() => handleDeleteTeacher(teacher.id, teacher.name)}
+                                            >
+                                                Delete
                                             </Button>
                                         </div>
                                     </div>

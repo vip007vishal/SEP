@@ -16,29 +16,29 @@ const AppRoutes: React.FC = () => {
     return (
         <Routes>
             <Route path="/login" element={<Login />} />
-            <Route
-                path="/admin"
+            <Route 
+                path="/admin" 
                 element={
                     <ProtectedRoute allowedRoles={[Role.ADMIN]}>
                         <AdminDashboard />
                     </ProtectedRoute>
-                }
+                } 
             />
-            <Route
-                path="/teacher"
+            <Route 
+                path="/teacher" 
                 element={
                     <ProtectedRoute allowedRoles={[Role.TEACHER]}>
                         <TeacherDashboard />
                     </ProtectedRoute>
-                }
+                } 
             />
-            <Route
-                path="/student"
+            <Route 
+                path="/student" 
                 element={
                     <ProtectedRoute allowedRoles={[Role.STUDENT]}>
                         <StudentDashboard />
                     </ProtectedRoute>
-                }
+                } 
             />
             <Route path="/" element={<Navigate to={user ? `/${user.role.toLowerCase()}` : '/login'} />} />
         </Routes>

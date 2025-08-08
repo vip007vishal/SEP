@@ -9,6 +9,7 @@ export interface User {
     name: string;
     email: string;
     role: Role;
+    password?: string; // For login
     permissionGranted?: boolean; // For teachers
     registerNumber?: string; // For students
 }
@@ -27,7 +28,7 @@ export interface StudentSet {
 }
 
 export interface Exam {
-    id: string;
+    id:string;
     title: string;
     date: string;
     halls: Hall[];

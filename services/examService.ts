@@ -1,33 +1,113 @@
 
-import { MOCK_EXAMS, MOCK_USERS } from '../constants';
-import { Hall, StudentSet, SeatingPlan, Exam, Seat, User } from '../types';
+import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role } from '../types';
 
-// In-memory store for demo purposes
-let exams: Exam[] = [...MOCK_EXAMS];
-let users: User[] = [...MOCK_USERS];
+// To ensure a true singleton in a hot-reload dev environment, we attach our DB to the window object.
+// This prevents HMR from resetting our data on every change.
+if (!(window as any).APP_DB) {
+    console.log("Initializing In-Memory Database...");
+    (window as any).APP_DB = {
+        users: [
+            { id: 'admin01', name: 'Admin User', email: 'admin@exam.com', role: Role.ADMIN, password: 'password123' },
+            { id: 'teacher01', name: 'Dr. Evelyn Reed', email: 'teacher1@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
+            { id: 'teacher02', name: 'Mr. Samuel Chen', email: 'teacher2@exam.com', role: Role.TEACHER, permissionGranted: false, password: 'password123' },
+            { id: 'teacher03', name: 'Ms. Anya Sharma', email: 'teacher3@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
+            { id: 'teacher04', name: 'Ms. Nitya', email: 'teacher4@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
+        ],
+        exams: [
+            {
+                id: 'exam01',
+                title: 'Mid-Term Examinations',
+                date: '2024-09-15',
+                halls: [
+                    { id: 'hallA', name: 'Hall A', rows: 8, cols: 8 },
+                    { id: 'hallB', name: 'Hall B', rows: 6, cols: 7 },
+                ],
+                studentSets: [
+                    { id: 'set101', subject: '101', studentCount: 50 },
+                    { id: 'set102', subject: '102', studentCount: 45 },
+                ],
+                seatingPlan: undefined,
+                createdBy: 'teacher01',
+            }
+        ]
+    };
+}
+
+// All functions will now reference this singleton DB.
+const db: { users: User[], exams: Exam[] } = (window as any).APP_DB;
+
+
+// --- User Management Functions (Synchronous, returning Promises) ---
+
+export const findUserByEmail = (email: string): Promise<User | undefined> => {
+     return Promise.resolve(db.users.find(u => u.email.toLowerCase() === email.toLowerCase()));
+};
+
+export const findUserById = (id: string): Promise<User | undefined> => {
+    return Promise.resolve(db.users.find(u => u.id === id));
+};
+
+
+export const createTeacherUser = (name: string, email: string, password: string): Promise<User | null> => {
+    if (db.users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+        return Promise.resolve(null); // User already exists
+    }
+
+    const newTeacher: User = {
+        id: `teacher${Date.now()}`,
+        name,
+        email,
+        role: Role.TEACHER,
+        permissionGranted: false,
+        password,
+    };
+
+    db.users = [...db.users, newTeacher]; // Immutable update
+    return Promise.resolve(newTeacher);
+};
 
 
 export const getTeachers = (): Promise<User[]> => {
-    return new Promise(resolve => setTimeout(() => resolve(users.filter(u => u.role === 'TEACHER')), 200));
+    return Promise.resolve(db.users.filter(u => u.role === 'TEACHER'));
 };
 
 export const toggleTeacherPermission = (teacherId: string): Promise<User | undefined> => {
-     return new Promise(resolve => setTimeout(() => {
-        const teacher = users.find(u => u.id === teacherId && u.role === 'TEACHER');
-        if (teacher) {
-            teacher.permissionGranted = !teacher.permissionGranted;
+    let updatedTeacher: User | undefined = undefined;
+    db.users = db.users.map(user => {
+        if (user.id === teacherId && user.role === 'TEACHER') {
+            updatedTeacher = { ...user, permissionGranted: !user.permissionGranted };
+            return updatedTeacher;
         }
-        resolve(teacher);
-    }, 200));
+        return user;
+    });
+    return Promise.resolve(updatedTeacher);
 };
 
+export const deleteTeacher = (teacherId: string): Promise<boolean> => {
+    const initialUserCount = db.users.length;
+    
+    // Filter out the teacher
+    db.users = db.users.filter(u => u.id !== teacherId);
+
+    // Also remove all exams created by this teacher (cascading delete)
+    db.exams = db.exams.filter(exam => exam.createdBy !== teacherId);
+    
+    const wasDeleted = db.users.length < initialUserCount;
+    return Promise.resolve(wasDeleted);
+};
+
+
+// --- Exam Management Functions (Synchronous, returning Promises) ---
+
 export const getAllExams = (): Promise<Exam[]> => {
-    return new Promise(resolve => setTimeout(() => resolve([...exams].sort((a, b) => b.id.localeCompare(a.id))), 200));
+    return Promise.resolve([...db.exams].sort((a, b) => b.id.localeCompare(a.id)));
 };
 
 // Ensures all exams have a seating plan generated if they don't already.
 const ensureAllPlansAreGenerated = () => {
-    for (const exam of exams) {
+    // This function can mutate exam objects in the 'exams' array directly
+    // since it's a private utility.
+    for (const exam of db.exams) {
         if (!exam.seatingPlan) {
             const plan = generateSeatingPlan(exam.halls, exam.studentSets);
             if (plan) {
@@ -38,30 +118,26 @@ const ensureAllPlansAreGenerated = () => {
 };
 
 export const getExamsForStudent = (registerNumber: string): Promise<Exam[]> => {
-    return new Promise(resolve => {
-        setTimeout(() => {
-            ensureAllPlansAreGenerated();
+    ensureAllPlansAreGenerated();
 
-            const studentExams = exams.filter(exam => {
-                if (!exam.seatingPlan) {
-                    return false;
-                }
+    const studentExams = db.exams.filter(exam => {
+        if (!exam.seatingPlan) {
+            return false;
+        }
 
-                // Check if any seat in any hall is assigned to the student
-                return Object.values(exam.seatingPlan).some(hallPlan => 
-                    hallPlan.some(row => 
-                        row.some(seat => seat.student?.id === registerNumber)
-                    )
-                );
-            });
-
-            resolve(studentExams.sort((a, b) => b.id.localeCompare(a.id)));
-        }, 200);
+        // Check if any seat in any hall is assigned to the student
+        return Object.values(exam.seatingPlan).some(hallPlan => 
+            hallPlan.some(row => 
+                row.some(seat => seat.student?.id === registerNumber)
+            )
+        );
     });
+
+    return Promise.resolve(studentExams.sort((a, b) => b.id.localeCompare(a.id)));
 };
 
 export const getExamsForTeacher = (teacherId: string): Promise<Exam[]> => {
-    return new Promise(resolve => setTimeout(() => resolve(exams.filter(e => e.createdBy === teacherId).sort((a,b) => b.id.localeCompare(a.id))), 200));
+    return Promise.resolve(db.exams.filter(e => e.createdBy === teacherId).sort((a,b) => b.id.localeCompare(a.id)));
 };
 
 export const createExam = (examData: {
@@ -79,30 +155,19 @@ export const createExam = (examData: {
         studentSets: examData.studentSets.map((s, i) => ({ ...s, id: `set${Date.now()}${i}` })),
         seatingPlan: undefined,
     };
-    exams.push(newExam);
-    return new Promise(resolve => setTimeout(() => resolve(newExam), 200));
+    db.exams = [...db.exams, newExam]; // Immutable update
+    return Promise.resolve(newExam);
 };
 
 export const updateExam = (updatedExam: Exam): Promise<Exam> => {
-    const index = exams.findIndex(e => e.id === updatedExam.id);
-    if(index !== -1) {
-        exams[index] = updatedExam;
-    }
-    return new Promise(resolve => setTimeout(() => resolve(updatedExam), 200));
+    db.exams = db.exams.map(exam => exam.id === updatedExam.id ? updatedExam : exam); // Immutable update
+    return Promise.resolve(updatedExam);
 };
 
 export const deleteExam = (examId: string): Promise<boolean> => {
-    return new Promise(resolve => {
-        setTimeout(() => {
-            const index = exams.findIndex(e => e.id === examId);
-            if (index !== -1) {
-                exams.splice(index, 1);
-                resolve(true); // Deletion successful
-            } else {
-                resolve(false); // Exam not found
-            }
-        }, 200);
-    });
+    const initialLength = db.exams.length;
+    db.exams = db.exams.filter(e => e.id !== examId); // Immutable update
+    return Promise.resolve(db.exams.length < initialLength);
 };
 
 export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): SeatingPlan | null => {
