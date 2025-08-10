@@ -1,4 +1,5 @@
 
+
 import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role } from '../types';
 
 // To ensure a true singleton in a hot-reload dev environment, we attach our DB to the window object.
@@ -23,8 +24,8 @@ if (!(window as any).APP_DB) {
                     { id: 'hallB', name: 'Hall B', rows: 6, cols: 7 },
                 ],
                 studentSets: [
-                    { id: 'set101', subject: '101', studentCount: 50 },
-                    { id: 'set102', subject: '102', studentCount: 45 },
+                    { id: 'set101', subject: '101', studentCount: 50, students: Array.from({ length: 50 }, (_, i) => `101${(i + 1).toString().padStart(3, '0')}`) },
+                    { id: 'set102', subject: '102', studentCount: 45, students: Array.from({ length: 45 }, (_, i) => `102${(i + 1).toString().padStart(3, '0')}`) },
                 ],
                 seatingPlan: undefined,
                 createdBy: 'teacher01',
@@ -144,7 +145,7 @@ export const createExam = (examData: {
     title: string;
     date: string;
     halls: Omit<Hall, 'id'>[];
-    studentSets: Omit<StudentSet, 'id'>[];
+    studentSets: (Omit<StudentSet, 'id' | 'studentCount'>)[];
 }, teacherId: string): Promise<Exam> => {
     const newExam: Exam = {
         title: examData.title,
@@ -152,7 +153,11 @@ export const createExam = (examData: {
         id: `exam${Date.now()}`,
         createdBy: teacherId,
         halls: examData.halls.map((h, i) => ({ ...h, id: `hall${Date.now()}${i}` })),
-        studentSets: examData.studentSets.map((s, i) => ({ ...s, id: `set${Date.now()}${i}` })),
+        studentSets: examData.studentSets.map((s, i) => ({
+             ...s, 
+             id: `set${Date.now()}${i}`, 
+             studentCount: s.students.length 
+        })),
         seatingPlan: undefined,
     };
     db.exams = [...db.exams, newExam]; // Immutable update
@@ -172,27 +177,12 @@ export const deleteExam = (examId: string): Promise<boolean> => {
 
 export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): SeatingPlan | null => {
     const totalSeats = halls.reduce((acc, hall) => acc + hall.rows * hall.cols, 0);
-    const totalStudents = studentSets.reduce((acc, set) => acc + set.studentCount, 0);
+    const totalStudents = studentSets.reduce((acc, set) => acc + set.students.length, 0);
 
     if (totalStudents > totalSeats) {
         console.error("Not enough seats for all students.");
         return null;
     }
-
-    // Create a flat list of all students with their set ID and a number within the set
-    const allStudents: { id: string; setId: string; setNumber: number }[] = [];
-    studentSets.forEach(set => {
-        // Use subject code for a more logical student ID. Default to 999 if not a number.
-        const subjectPrefix = /^\d+$/.test(set.subject) ? set.subject : '999';
-        for (let i = 0; i < set.studentCount; i++) {
-            const studentPaddedNumber = (i + 1).toString().padStart(3, '0');
-            allStudents.push({ 
-                id: `${subjectPrefix}${studentPaddedNumber}`, // e.g., 101001, 102045
-                setId: set.id,
-                setNumber: i + 1,
-            });
-        }
-    });
 
     // Create a flat list of all available seats
     const allSeats: Seat[] = [];
@@ -204,37 +194,74 @@ export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): S
         }
     });
     
-    // Zig-zag assignment to separate sets
-    let studentIndex = 0;
-    const studentSetsRotator = [...studentSets];
-    
     const assignedSeats: { [key: string]: Seat } = {};
+    
+    // Create a map of set IDs to their SORTED student lists
     const studentsBySet = studentSets.reduce((acc, set) => {
-      acc[set.id] = allStudents.filter(s => s.setId === set.id);
+      // Sort students by register number instead of shuffling
+      const sortedStudents = [...set.students].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      acc[set.id] = sortedStudents.map((studentId, i) => ({
+        id: studentId, // The actual register number
+        setId: set.id,
+        setNumber: i + 1, // A sequence number within the set
+      }));
       return acc;
     }, {} as Record<string, { id: string; setId: string; setNumber: number }[]>);
+    
+    const activeStudentSets = studentSets.filter(set => set.students.length > 0);
 
-    let setIndex = 0;
-    for (let i = 0; i < allSeats.length && studentIndex < totalStudents; i++) {
-        const seat = allSeats[i];
-        
-        let assigned = false;
-        let attempts = 0;
-        while(!assigned && attempts < studentSets.length) {
-            const currentSetId = studentSetsRotator[setIndex % studentSetsRotator.length].id;
-            if(studentsBySet[currentSetId]?.length > 0) {
-                const studentToAssign = studentsBySet[currentSetId].pop()!;
+    const useSpacedLayout = activeStudentSets.length === 1 && (() => {
+        const studentsToPlace = studentsBySet[activeStudentSets[0].id];
+        const requiredSeatsForSpacing = studentsToPlace.length * 2 - (studentsToPlace.length > 0 ? 1 : 0);
+        return totalSeats >= requiredSeatsForSpacing;
+    })();
+
+    if (useSpacedLayout) {
+        const singleSet = activeStudentSets[0];
+        const studentsToPlace = studentsBySet[singleSet.id];
+        let seatIndex = 0;
+        for (const studentToAssign of studentsToPlace) {
+            if (seatIndex < allSeats.length) {
+                const seat = allSeats[seatIndex];
                 seat.student = studentToAssign;
                 assignedSeats[`${seat.hallId}-${seat.row}-${seat.col}`] = seat;
-                studentIndex++;
-                assigned = true;
+                seatIndex += 2; // Skip the next seat
             }
-            setIndex++;
-            attempts++;
+        }
+    } else {
+        // Default logic for multiple sets, or for a single set without enough room to be spaced out.
+        const studentSetsRotator = [...studentSets].filter(set => set.students.length > 0);
+        let setIndex = 0;
+        let studentPlacedCount = 0;
+        
+        // Assign students to seats
+        for (let i = 0; i < allSeats.length && studentPlacedCount < totalStudents; i++) {
+            const seat = allSeats[i];
+            
+            const setsWithStudents = studentSets.filter(set => (studentsBySet[set.id]?.length || 0) > 0);
+
+            if (setsWithStudents.length > 0) {
+                let assigned = false;
+                let attempts = 0;
+                // Rotate through sets to ensure students from the same set are separated.
+                while(!assigned && attempts < studentSetsRotator.length) {
+                    const currentSetId = studentSetsRotator[setIndex % studentSetsRotator.length].id;
+                    
+                    if (studentsBySet[currentSetId]?.length > 0) {
+                        const studentToAssign = studentsBySet[currentSetId].shift()!;
+                        seat.student = studentToAssign;
+                        assignedSeats[`${seat.hallId}-${seat.row}-${seat.col}`] = seat;
+                        studentPlacedCount++;
+                        assigned = true;
+                    }
+                    
+                    setIndex++;
+                    attempts++;
+                }
+            }
         }
     }
     
-
     // Reconstruct the seating plan into a 2D array for each hall
     const finalPlan: SeatingPlan = {};
     halls.forEach(hall => {

@@ -25,6 +25,7 @@ export interface StudentSet {
     id: string;
     subject: string;
     studentCount: number;
+    students: string[]; // List of student register numbers
 }
 
 export interface Exam {
@@ -42,7 +43,7 @@ export interface Seat {
     row: number;
     col: number;
     student?: {
-        id: string;
+        id: string; // This will now be the actual register number
         setId: string;
         setNumber: number;
     };

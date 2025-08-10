@@ -9,13 +9,23 @@ import Button from './common/Button';
 import Input from './common/Input';
 import SeatingPlanVisualizer from './common/SeatingPlanVisualizer';
 
+// Make XLSX available from the window object loaded via CDN
+declare global {
+  interface Window { XLSX: any; }
+}
+const XLSX = window.XLSX;
+
+
 // Types for form state to allow empty strings for number inputs
 interface FormHall extends Omit<Hall, 'rows'|'cols'> {
     rows: string | number;
     cols: string | number;
 }
 interface FormStudentSet extends Omit<StudentSet, 'studentCount'> {
-    studentCount: string | number;
+    entryType: 'manual' | 'upload';
+    studentCount: string | number; // For manual entry
+    students: string[]; // For upload
+    files: File[];
 }
 interface FormExam extends Omit<Exam, 'halls' | 'studentSets'> {
     halls: FormHall[];
@@ -28,11 +38,20 @@ const TrashIcon: React.FC<{className?: string}> = ({className}) => (
   </svg>
 );
 
+const UploadIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+    </svg>
+);
+
+
 const TeacherDashboard: React.FC = () => {
     const { user } = useAuth();
     const [exams, setExams] = useState<Exam[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isParsingFile, setIsParsingFile] = useState(false);
     const [activeExam, setActiveExam] = useState<FormExam | null>(null);
+    const [originalActiveExam, setOriginalActiveExam] = useState<FormExam | null>(null);
     const [formError, setFormError] = useState('');
     
     const initialNewExamState: FormExam = {
@@ -40,7 +59,7 @@ const TeacherDashboard: React.FC = () => {
         title: '',
         date: '',
         halls: [{ id: `new-hall-${Date.now()}`, name: 'Hall A', rows: 8, cols: 10 }],
-        studentSets: [{ id: `new-set-${Date.now()}`, subject: '101', studentCount: 20 }],
+        studentSets: [{ id: `new-set-${Date.now()}`, subject: '', studentCount: '', students: [], files: [], entryType: 'manual' }],
         createdBy: user?.id || ''
     };
 
@@ -86,16 +105,32 @@ const TeacherDashboard: React.FC = () => {
         setActiveExam(prev => prev ? { ...prev, halls: prev.halls.filter((_, i) => i !== index) } : null);
     };
 
-    const handleSetChange = (index: number, field: keyof Omit<FormStudentSet, 'id'>, value: string) => {
+    const handleSetChange = (index: number, field: 'subject' | 'studentCount', value: string) => {
         if (!activeExam) return;
         const updatedSets = [...activeExam.studentSets];
         updatedSets[index] = { ...updatedSets[index], [field]: value };
         setActiveExam(prev => prev ? { ...prev, studentSets: updatedSets } : null);
     };
 
+    const handleSetEntryTypeChange = (index: number, type: 'manual' | 'upload') => {
+        if (!activeExam) return;
+        const updatedSets = [...activeExam.studentSets];
+        const currentSet = { ...updatedSets[index], entryType: type };
+        
+        if (type === 'manual') {
+            currentSet.students = [];
+            currentSet.files = [];
+        } else { // 'upload'
+            currentSet.studentCount = '';
+        }
+
+        updatedSets[index] = currentSet;
+        setActiveExam(prev => prev ? { ...prev, studentSets: updatedSets } : null);
+    };
+
     const handleAddSet = () => {
         if (!activeExam) return;
-        const newSet: FormStudentSet = { id: `new-set-${Date.now()}`, subject: 'New Subject', studentCount: 20 };
+        const newSet: FormStudentSet = { id: `new-set-${Date.now()}`, subject: '', studentCount: '', students: [], files: [], entryType: 'manual' };
         setActiveExam(prev => prev ? { ...prev, studentSets: [...prev.studentSets, newSet] } : null);
     };
 
@@ -104,15 +139,69 @@ const TeacherDashboard: React.FC = () => {
         setActiveExam(prev => prev ? { ...prev, studentSets: prev.studentSets.filter((_, i) => i !== index) } : null);
     };
 
-    // --- Actions ---
+    const handleFileUpload = async (index: number, fileList: FileList | null) => {
+        if (!activeExam || !fileList || fileList.length === 0) return;
+
+        if (typeof XLSX === 'undefined') {
+            setFormError("File reading library (XLSX) is not loaded. Please check your internet connection and refresh.");
+            return;
+        }
+
+        setIsParsingFile(true);
+        setFormError('');
+        
+        const updatedSets = [...activeExam.studentSets];
+        const currentSet = updatedSets[index];
+        
+        let allRegisterNumbers: string[] = [];
+        const newFiles = Array.from(fileList);
+        
+        for (const file of newFiles) {
+            try {
+                const data = await file.arrayBuffer();
+                const workbook = XLSX.read(data);
+                for (const sheetName of workbook.SheetNames) {
+                    const worksheet = workbook.Sheets[sheetName];
+                    const json: (string|number)[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                    const registerNumbers = json.map(row => row[0]).filter(val => val != null && String(val).trim() !== '').map(String);
+                    allRegisterNumbers.push(...registerNumbers);
+                }
+            } catch (error) {
+                console.error("Error parsing file:", error);
+                setFormError(`Error processing file "${file.name}". Please ensure it is a valid Excel file.`);
+                setIsParsingFile(false);
+                return;
+            }
+        }
+        
+        const combinedStudents = [...new Set([...currentSet.students, ...allRegisterNumbers])];
+        const combinedFiles = [...(currentSet.files || []), ...newFiles];
+
+        // Auto-generate a subject name from the first uploaded file if the set doesn't have a name yet.
+        const subject = currentSet.subject || (fileList && fileList.length > 0 ? fileList[0].name.replace(/\.[^/.]+$/, "") : `Uploaded Set ${index + 1}`);
+
+        updatedSets[index] = { 
+            ...currentSet,
+            entryType: 'upload',
+            subject: subject, // Set the auto-generated subject
+            students: combinedStudents,
+            studentCount: '',
+            files: combinedFiles,
+        };
+
+        setActiveExam(prev => prev ? { ...prev, studentSets: updatedSets } : null);
+        setIsParsingFile(false);
+    };
+
+    const handleClearStudents = (index: number) => {
+        if (!activeExam) return;
+        const updatedSets = [...activeExam.studentSets];
+        updatedSets[index] = { ...updatedSets[index], students: [], files: [], subject: '' }; // Also clear subject
+        setActiveExam(prev => prev ? { ...prev, studentSets: updatedSets } : null);
+    };
 
     const validateAndParseForm = (): Exam | null => {
         if (!activeExam) return null;
-
-        if (!activeExam.title.trim() || !activeExam.date || activeExam.halls.length === 0 || activeExam.studentSets.length === 0) {
-            setFormError("Please fill in all exam details, and add at least one hall and one student set.");
-            return null;
-        }
 
         try {
             const parsedHalls = activeExam.halls.map(h => {
@@ -124,13 +213,40 @@ const TeacherDashboard: React.FC = () => {
                 return { ...h, id: h.id || `hall-${Date.now()}`, rows, cols };
             });
 
-            const parsedSets = activeExam.studentSets.map(s => {
-                const studentCount = parseInt(String(s.studentCount), 10);
-                if (isNaN(studentCount) || studentCount <= 0) {
-                    throw new Error(`Invalid student count for set "${s.subject}". Please enter a positive number.`);
+            if (parsedHalls.length === 0) throw new Error("Please add at least one hall.");
+
+            const parsedSets: StudentSet[] = activeExam.studentSets.map((s, index) => {
+                if (!s.subject.trim()) {
+                    throw new Error(`Please provide a name/code for Set ${index + 1}.`);
                 }
-                return { ...s, id: s.id || `set-${Date.now()}`, studentCount };
+                if (s.entryType === 'manual') {
+                    const studentCount = parseInt(String(s.studentCount), 10);
+                    if (isNaN(studentCount) || studentCount <= 0) {
+                        throw new Error(`Please enter a valid number of students for set "${s.subject}".`);
+                    }
+                    const padding = String(studentCount).length;
+                    const generatedStudents = Array.from({ length: studentCount }, (_, i) => `${s.subject.replace(/\s+/g, '')}${(i + 1).toString().padStart(padding, '0')}`);
+                    return {
+                        id: s.id || `set-${Date.now()}`,
+                        subject: s.subject,
+                        studentCount: studentCount,
+                        students: generatedStudents,
+                    };
+                } else { // 'upload'
+                    if (s.students.length === 0) {
+                        throw new Error(`No students have been uploaded for Set "${s.subject}". Please upload an Excel file.`);
+                    }
+                    
+                    return {
+                        id: s.id || `set-${Date.now()}`,
+                        subject: s.subject,
+                        studentCount: s.students.length,
+                        students: s.students,
+                    };
+                }
             });
+
+            if (parsedSets.length === 0) throw new Error("Please add at least one student set.");
 
             return {
                 ...activeExam,
@@ -152,11 +268,11 @@ const TeacherDashboard: React.FC = () => {
         const parsedExam = validateAndParseForm();
         if (!parsedExam) return;
         
-        if (activeExam.id) { // Is an update
+        if (activeExam.id) {
             const originalExam = exams.find(e => e.id === activeExam.id);
             if(originalExam) {
                  const hallsChanged = JSON.stringify(parsedExam.halls.map(({id, ...rest}) => rest)) !== JSON.stringify(originalExam.halls.map(({id, ...rest}) => rest));
-                 const setsChanged = JSON.stringify(parsedExam.studentSets.map(({id, ...rest}) => rest)) !== JSON.stringify(originalExam.studentSets.map(({id, ...rest}) => rest));
+                 const setsChanged = JSON.stringify(parsedExam.studentSets.map(s => ({subject: s.subject, students: s.students}))) !== JSON.stringify(originalExam.studentSets.map(s => ({subject: s.subject, students: s.students})));
                  if ((hallsChanged || setsChanged) && parsedExam.seatingPlan) {
                     parsedExam.seatingPlan = undefined;
                  }
@@ -171,13 +287,14 @@ const TeacherDashboard: React.FC = () => {
                 title: parsedExam.title,
                 date: parsedExam.date,
                 halls: parsedExam.halls,
-                studentSets: parsedExam.studentSets
+                studentSets: parsedExam.studentSets.map(s => ({ subject: s.subject, students: s.students }))
             }, user.id);
         }
         
         await fetchExams();
         setIsLoading(false);
         setActiveExam(null);
+        setOriginalActiveExam(null);
     };
 
     const handleGeneratePlan = async () => {
@@ -193,10 +310,19 @@ const TeacherDashboard: React.FC = () => {
             setIsLoading(true);
             const updated = await updateExam(examWithPlan);
             await fetchExams();
-            setActiveExam(JSON.parse(JSON.stringify(updated)));
+            // Reload into form state
+            const formExamState = {
+                ...examWithPlan,
+                studentSets: activeExam.studentSets.map((s, i) => ({
+                    ...s,
+                    ...examWithPlan.studentSets[i]
+                }))
+            };
+            setActiveExam(formExamState);
+            setOriginalActiveExam(JSON.parse(JSON.stringify(formExamState)));
             setIsLoading(false);
         } else {
-            setFormError('Failed to generate seating plan. Not enough seats for all students. Please add more hall space or reduce the number of students.');
+            setFormError('Failed to generate seating plan. Not enough seats for all students.');
         }
     };
     
@@ -206,6 +332,7 @@ const TeacherDashboard: React.FC = () => {
             await deleteExam(examId);
             if (activeExam?.id === examId) {
                 setActiveExam(null);
+                setOriginalActiveExam(null);
             }
             await fetchExams();
             setIsLoading(false);
@@ -213,17 +340,30 @@ const TeacherDashboard: React.FC = () => {
     };
 
     const handleSelectExam = (exam: Exam) => {
-        setActiveExam(JSON.parse(JSON.stringify(exam))); // Deep copy to avoid mutation issues
+        const formExam: FormExam = {
+            ...JSON.parse(JSON.stringify(exam)),
+            studentSets: exam.studentSets.map((s: StudentSet): FormStudentSet => ({
+                ...s,
+                studentCount: s.studentCount,
+                files: [],
+                entryType: 'upload',
+            }))
+        };
+        setActiveExam(formExam);
+        setOriginalActiveExam(JSON.parse(JSON.stringify(formExam)));
         setFormError('');
     };
 
     const handleStartCreating = () => {
-        setActiveExam({ ...initialNewExamState, createdBy: user?.id || '' });
+        const newExamState = { ...initialNewExamState, createdBy: user?.id || '' };
+        setActiveExam(newExamState);
+        setOriginalActiveExam(JSON.parse(JSON.stringify(newExamState)));
         setFormError('');
     };
     
     const handleCancel = () => {
         setActiveExam(null);
+        setOriginalActiveExam(null);
         setFormError('');
     }
 
@@ -252,12 +392,13 @@ const TeacherDashboard: React.FC = () => {
     
     if (activeExam) {
         const isNewExam = !activeExam.id;
-        const originalExam = isNewExam ? null : exams.find(e => e.id === activeExam.id);
-        const isDirty = originalExam ? JSON.stringify(activeExam) !== JSON.stringify(originalExam) : true;
-
-        const parsedStudentSetsForVisualizer: StudentSet[] = activeExam.studentSets.map(set => ({
-            ...set,
-            studentCount: Number(set.studentCount) || 0,
+        const isDirty = originalActiveExam ? JSON.stringify(activeExam) !== JSON.stringify(originalActiveExam) : false;
+        
+        const parsedStudentSetsForVisualizer: StudentSet[] = (activeExam.studentSets || []).map(set => ({
+            id: set.id,
+            subject: set.subject || (set.entryType === 'upload' ? 'Uploaded Set' : 'Unnamed Set'),
+            studentCount: set.entryType === 'manual' ? (Number(set.studentCount) || 0) : set.students.length,
+            students: set.students || [],
         }));
 
         return (
@@ -288,10 +429,10 @@ const TeacherDashboard: React.FC = () => {
                                 </div>
                                 <div className="space-y-3">
                                     {activeExam.halls.map((hall, index) => (
-                                        <div key={hall.id || index} className="p-2 bg-slate-50 rounded-lg space-y-2">
+                                        <div key={hall.id || index} className="p-3 bg-slate-50 rounded-lg space-y-2">
                                             <div className="flex justify-between items-start">
-                                                <Input containerClassName="flex-grow" placeholder="Hall Name" value={hall.name} onChange={e => handleHallChange(index, 'name', e.target.value)} />
-                                                {activeExam.halls.length > 1 && <button onClick={() => handleRemoveHall(index)} className="text-red-500 hover:text-red-700 p-2 ml-1"><TrashIcon /></button>}
+                                                <Input containerClassName="flex-grow mr-2" label={`Hall ${index + 1} Name`} placeholder="e.g., Main Hall" value={hall.name} onChange={e => handleHallChange(index, 'name', e.target.value)} />
+                                                {activeExam.halls.length > 1 && <button onClick={() => handleRemoveHall(index)} className="text-red-500 hover:text-red-700 p-2 mt-6"><TrashIcon /></button>}
                                             </div>
                                             <div className="flex gap-2">
                                                 <Input type="number" min="1" label="Rows" value={hall.rows} onChange={e => handleHallChange(index, 'rows', e.target.value)} />
@@ -307,14 +448,72 @@ const TeacherDashboard: React.FC = () => {
                                     <h3 className="text-xl font-semibold">Student Sets</h3>
                                     <Button onClick={handleAddSet} variant="secondary" className="text-sm !py-1 !px-3">+ Add Set</Button>
                                 </div>
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     {activeExam.studentSets.map((set, index) => (
-                                        <div key={set.id || index} className="p-2 bg-slate-50 rounded-lg space-y-2">
-                                             <div className="flex justify-between items-start">
-                                                <Input containerClassName="flex-grow" placeholder="Set Code (e.g., 101)" value={set.subject} onChange={e => handleSetChange(index, 'subject', e.target.value)} />
-                                                {activeExam.studentSets.length > 1 && <button onClick={() => handleRemoveSet(index)} className="text-red-500 hover:text-red-700 p-2 ml-1"><TrashIcon /></button>}
-                                             </div>
-                                            <Input type="number" min="1" label="# of Students" value={set.studentCount} onChange={e => handleSetChange(index, 'studentCount', e.target.value)} />
+                                        <div key={set.id || index} className="p-3 bg-slate-50 rounded-lg">
+                                            <div className="flex justify-between items-center mb-2">
+                                                <h4 className="text-lg font-semibold text-slate-800">
+                                                    {set.subject || `Set ${index + 1}`}
+                                                </h4>
+                                                {activeExam.studentSets.length > 1 && <button onClick={() => handleRemoveSet(index)} className="text-red-500 hover:text-red-700 p-2"><TrashIcon /></button>}
+                                            </div>
+                                            
+                                            <div className="flex items-center space-x-4 mb-3 text-sm">
+                                                <label className="flex items-center cursor-pointer">
+                                                    <input type="radio" name={`entryType-${index}`} checked={set.entryType === 'manual'} onChange={() => handleSetEntryTypeChange(index, 'manual')} className="form-radio text-violet-600 focus:ring-violet-500" />
+                                                    <span className="ml-2 text-slate-700">Manual Entry</span>
+                                                </label>
+                                                <label className="flex items-center cursor-pointer">
+                                                    <input type="radio" name={`entryType-${index}`} checked={set.entryType === 'upload'} onChange={() => handleSetEntryTypeChange(index, 'upload')} className="form-radio text-violet-600 focus:ring-violet-500"/>
+                                                    <span className="ml-2 text-slate-700">Upload Excel</span>
+                                                </label>
+                                            </div>
+                                            
+                                            {set.entryType === 'manual' ? (
+                                                <div className="space-y-3">
+                                                    <Input 
+                                                        label="Set Name / Code" 
+                                                        placeholder="e.g., Physics 101 or CS-A" 
+                                                        value={set.subject} 
+                                                        onChange={e => handleSetChange(index, 'subject', e.target.value)} 
+                                                    />
+                                                    <Input type="number" min="1" label="Number of Students" placeholder="e.g., 50" value={set.studentCount} onChange={e => handleSetChange(index, 'studentCount', e.target.value)} />
+                                                </div>
+                                            ) : (
+                                                <div className="space-y-3">
+                                                     <Input 
+                                                        label="Set Name / Code" 
+                                                        placeholder="e.g., Physics 101 or CS-A" 
+                                                        value={set.subject} 
+                                                        onChange={e => handleSetChange(index, 'subject', e.target.value)} 
+                                                    />
+                                                    <div className="p-3 bg-white rounded-md border border-slate-200">
+                                                        <label htmlFor={`file-upload-${index}`} className={`cursor-pointer bg-violet-100 text-violet-700 font-semibold text-sm py-2 px-4 rounded-lg hover:bg-violet-200 transition-all w-full text-center inline-block ${isParsingFile ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                                            <UploadIcon className="inline-block mr-2 h-4 w-4" />
+                                                            {isParsingFile ? 'Parsing...' : 'Upload Student List(s)'}
+                                                        </label>
+                                                        <input id={`file-upload-${index}`} type="file" multiple accept=".xlsx, .xls" className="hidden" onChange={(e) => handleFileUpload(index, e.target.files)} disabled={isParsingFile} />
+                                                        <p className="text-xs text-slate-400 mt-2 text-center">Register numbers in first column.</p>
+
+                                                        {set.students.length > 0 ? (
+                                                            <div className="text-sm mt-3">
+                                                                <p className="font-semibold text-green-700 text-center">{set.students.length} unique students loaded.</p>
+                                                                {set.files?.length > 0 && (
+                                                                    <div className="mt-2 text-center">
+                                                                        <p className="text-xs text-slate-600 font-medium">Uploaded files:</p>
+                                                                        <ul className="text-xs text-slate-500 list-none">
+                                                                            {set.files.map((file, i) => <li key={`${file.name}-${i}`}>{file.name}</li>)}
+                                                                        </ul>
+                                                                    </div>
+                                                                )}
+                                                                <button onClick={() => handleClearStudents(index)} className="text-xs text-red-500 hover:underline mt-2 w-full text-center">Clear uploaded students</button>
+                                                            </div>
+                                                        ) : (
+                                                            <p className="text-xs text-slate-500 mt-2 text-center">No students uploaded yet.</p>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
@@ -323,14 +522,14 @@ const TeacherDashboard: React.FC = () => {
                             <Card>
                                  <h3 className="text-xl font-semibold mb-4">Actions</h3>
                                 <div className="space-y-2">
-                                    <Button onClick={handleSave} className="w-full" disabled={!isDirty || isLoading}>
-                                        {isLoading && isDirty ? 'Saving...' : (isNewExam ? 'Create Exam' : 'Save Changes')}
+                                    <Button onClick={handleSave} className="w-full" disabled={!isDirty || isLoading || isParsingFile}>
+                                        {(isLoading && isDirty) ? 'Saving...' : (isNewExam ? 'Create Exam' : 'Save Changes')}
                                     </Button>
-                                    <Button onClick={handleGeneratePlan} className="w-full" variant="secondary" disabled={isDirty || isLoading}>
+                                    <Button onClick={handleGeneratePlan} className="w-full" variant="secondary" disabled={isDirty || isLoading || isParsingFile}>
                                         {activeExam.seatingPlan ? 'Re-generate Plan' : 'Generate Seating Plan'}
                                     </Button>
                                 </div>
-                                {isDirty && !isNewExam && <p className="text-xs text-amber-600 mt-2 text-center">You have unsaved changes.</p>}
+                                {isDirty && <p className="text-xs text-amber-600 mt-2 text-center">You have unsaved changes. Save before generating a plan.</p>}
                                 {formError && <p className="text-sm text-red-600 mt-3 text-center">{formError}</p>}
 
                                  {!isNewExam && (
@@ -340,7 +539,7 @@ const TeacherDashboard: React.FC = () => {
                                             onClick={() => handleDeleteExam(activeExam.id)}
                                             variant="danger"
                                             className="w-full"
-                                            disabled={isLoading}
+                                            disabled={isLoading || isParsingFile}
                                         >
                                             Delete This Exam
                                         </Button>
@@ -377,7 +576,7 @@ const TeacherDashboard: React.FC = () => {
                             ) : (
                                 <div className="text-center text-slate-500 py-10 min-h-[300px] flex flex-col justify-center items-center">
                                     <p className="mb-4">No seating plan generated yet. Configure and save your exam, then generate the plan.</p>
-                                    <Button onClick={handleGeneratePlan} variant="primary" disabled={isDirty || isLoading}>Generate Plan</Button>
+                                    <Button onClick={handleGeneratePlan} variant="primary" disabled={isDirty || isLoading || isParsingFile}>Generate Plan</Button>
                                 </div>
                             )}
                         </Card>

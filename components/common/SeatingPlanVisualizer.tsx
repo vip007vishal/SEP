@@ -42,16 +42,16 @@ const SeatingPlanVisualizer: React.FC<SeatingPlanVisualizerProps> = ({ hall, pla
                         const studentSet = seat.student ? studentSets.find(s => s.id === seat.student.setId) : null;
                         
                         let seatContent: React.ReactNode = null;
-                        if(seat.student && studentSet) {
-                            const paddedSetNumber = seat.student.setNumber.toString().padStart(3, '0');
-                            seatContent = `${studentSet.subject}${paddedSetNumber}`;
+                        if(seat.student) {
+                            // Display the actual student register number
+                            seatContent = seat.student.id;
                         }
 
                         return (
                             <div
                                 key={index}
-                                title={seat.student && studentSet ? `Seat: R${seat.row+1}C${seat.col+1} - Student ID: ${seatContent}` : `Empty: R${seat.row+1}C${seat.col+1}`}
-                                className={`w-full aspect-square rounded-lg flex items-center justify-center text-center text-sm font-bold text-slate-700 transition-all break-words ${bgColor} ${border}`}
+                                title={seat.student && studentSet ? `Seat: R${seat.row+1}C${seat.col+1} - Student ID: ${seat.student.id} | Set: ${studentSet.subject}` : `Empty: R${seat.row+1}C${seat.col+1}`}
+                                className={`w-full aspect-square rounded-lg flex items-center justify-center text-center text-xs font-bold text-slate-700 transition-all break-words p-1 ${bgColor} ${border}`}
                             >
                                 {seatContent}
                             </div>

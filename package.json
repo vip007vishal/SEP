@@ -1,8 +1,9 @@
 {
-  "name": "main-smart-exam-planner",
+  "name": "smart-exam-planner",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "homepage": "https://vishalvip.github.io/SEP/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
