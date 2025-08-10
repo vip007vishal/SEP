@@ -1,41 +1,77 @@
 
-
 import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role } from '../types';
 
-// To ensure a true singleton in a hot-reload dev environment, we attach our DB to the window object.
-// This prevents HMR from resetting our data on every change.
-if (!(window as any).APP_DB) {
-    console.log("Initializing In-Memory Database...");
-    (window as any).APP_DB = {
-        users: [
-            { id: 'admin01', name: 'Admin User', email: 'admin@exam.com', role: Role.ADMIN, password: 'password123' },
-            { id: 'teacher01', name: 'Dr. Evelyn Reed', email: 'teacher1@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
-            { id: 'teacher02', name: 'Mr. Samuel Chen', email: 'teacher2@exam.com', role: Role.TEACHER, permissionGranted: false, password: 'password123' },
-            { id: 'teacher03', name: 'Ms. Anya Sharma', email: 'teacher3@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
-            { id: 'teacher04', name: 'Ms. Nitya', email: 'teacher4@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
-        ],
-        exams: [
-            {
-                id: 'exam01',
-                title: 'Mid-Term Examinations',
-                date: '2024-09-15',
-                halls: [
-                    { id: 'hallA', name: 'Hall A', rows: 8, cols: 8 },
-                    { id: 'hallB', name: 'Hall B', rows: 6, cols: 7 },
-                ],
-                studentSets: [
-                    { id: 'set101', subject: '101', studentCount: 50, students: Array.from({ length: 50 }, (_, i) => `101${(i + 1).toString().padStart(3, '0')}`) },
-                    { id: 'set102', subject: '102', studentCount: 45, students: Array.from({ length: 45 }, (_, i) => `102${(i + 1).toString().padStart(3, '0')}`) },
-                ],
-                seatingPlan: undefined,
-                createdBy: 'teacher01',
-            }
-        ]
-    };
+const DB_KEY = 'smartExamPlannerDB';
+
+// Define the shape of our database
+interface AppDB {
+    users: User[];
+    exams: Exam[];
 }
 
-// All functions will now reference this singleton DB.
-const db: { users: User[], exams: Exam[] } = (window as any).APP_DB;
+// Function to get the initial state of the database
+const getInitialDB = (): AppDB => ({
+    users: [
+        { id: 'admin01', name: 'Admin User', email: 'admin@exam.com', role: Role.ADMIN, password: 'password123' },
+        { id: 'teacher01', name: 'Dr. Evelyn Reed', email: 'teacher1@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
+        { id: 'teacher02', name: 'Mr. Samuel Chen', email: 'teacher2@exam.com', role: Role.TEACHER, permissionGranted: false, password: 'password123' },
+        { id: 'teacher03', name: 'Ms. Anya Sharma', email: 'teacher3@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
+        { id: 'teacher04', name: 'Ms. Nitya', email: 'teacher4@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123' },
+    ],
+    exams: [
+        {
+            id: 'exam01',
+            title: 'Mid-Term Examinations',
+            date: '2024-09-15',
+            halls: [
+                { id: 'hallA', name: 'Hall A', rows: 8, cols: 8 },
+                { id: 'hallB', name: 'Hall B', rows: 6, cols: 7 },
+            ],
+            studentSets: [
+                { id: 'set101', subject: '101', studentCount: 50, students: Array.from({ length: 50 }, (_, i) => `101${(i + 1).toString().padStart(3, '0')}`) },
+                { id: 'set102', subject: '102', studentCount: 45, students: Array.from({ length: 45 }, (_, i) => `102${(i + 1).toString().padStart(3, '0')}`) },
+            ],
+            seatingPlan: undefined,
+            createdBy: 'teacher01',
+        }
+    ]
+});
+
+// A single in-memory instance of the database.
+let db: AppDB;
+
+// Function to save the DB to localStorage.
+const saveDB = (newDBState: AppDB) => {
+    try {
+        localStorage.setItem(DB_KEY, JSON.stringify(newDBState));
+        // Also update the in-memory instance for the current session
+        db = newDBState;
+    } catch (e) {
+        console.error("Failed to save DB to localStorage.", e);
+    }
+};
+
+// Function to load DB from localStorage or initialize it.
+const loadDB = (): AppDB => {
+    try {
+        const storedDB = localStorage.getItem(DB_KEY);
+        if (storedDB) {
+            console.log("Loading database from localStorage...");
+            return JSON.parse(storedDB);
+        }
+    } catch (e) {
+        console.error("Failed to parse DB from localStorage, initializing fresh.", e);
+    }
+    
+    console.log("Initializing new database in localStorage...");
+    const initialDB = getInitialDB();
+    saveDB(initialDB);
+    return initialDB;
+};
+
+
+// Initialize the database when the module is first loaded.
+db = loadDB();
 
 
 // --- User Management Functions (Synchronous, returning Promises) ---
@@ -63,7 +99,7 @@ export const createTeacherUser = (name: string, email: string, password: string)
         password,
     };
 
-    db.users = [...db.users, newTeacher]; // Immutable update
+    saveDB({ ...db, users: [...db.users, newTeacher] });
     return Promise.resolve(newTeacher);
 };
 
@@ -74,13 +110,17 @@ export const getTeachers = (): Promise<User[]> => {
 
 export const toggleTeacherPermission = (teacherId: string): Promise<User | undefined> => {
     let updatedTeacher: User | undefined = undefined;
-    db.users = db.users.map(user => {
+    const newUsers = db.users.map(user => {
         if (user.id === teacherId && user.role === 'TEACHER') {
             updatedTeacher = { ...user, permissionGranted: !user.permissionGranted };
             return updatedTeacher;
         }
         return user;
     });
+    
+    if (updatedTeacher) {
+        saveDB({ ...db, users: newUsers });
+    }
     return Promise.resolve(updatedTeacher);
 };
 
@@ -88,12 +128,15 @@ export const deleteTeacher = (teacherId: string): Promise<boolean> => {
     const initialUserCount = db.users.length;
     
     // Filter out the teacher
-    db.users = db.users.filter(u => u.id !== teacherId);
+    const newUsers = db.users.filter(u => u.id !== teacherId);
 
     // Also remove all exams created by this teacher (cascading delete)
-    db.exams = db.exams.filter(exam => exam.createdBy !== teacherId);
+    const newExams = db.exams.filter(exam => exam.createdBy !== teacherId);
     
-    const wasDeleted = db.users.length < initialUserCount;
+    const wasDeleted = newUsers.length < initialUserCount;
+    if (wasDeleted) {
+        saveDB({ users: newUsers, exams: newExams });
+    }
     return Promise.resolve(wasDeleted);
 };
 
@@ -106,15 +149,20 @@ export const getAllExams = (): Promise<Exam[]> => {
 
 // Ensures all exams have a seating plan generated if they don't already.
 const ensureAllPlansAreGenerated = () => {
-    // This function can mutate exam objects in the 'exams' array directly
-    // since it's a private utility.
-    for (const exam of db.exams) {
+    let hasChanged = false;
+    const updatedExams = db.exams.map(exam => {
         if (!exam.seatingPlan) {
             const plan = generateSeatingPlan(exam.halls, exam.studentSets);
             if (plan) {
-                exam.seatingPlan = plan;
+                hasChanged = true;
+                return { ...exam, seatingPlan: plan };
             }
         }
+        return exam;
+    });
+
+    if (hasChanged) {
+        saveDB({ ...db, exams: updatedExams });
     }
 };
 
@@ -160,19 +208,24 @@ export const createExam = (examData: {
         })),
         seatingPlan: undefined,
     };
-    db.exams = [...db.exams, newExam]; // Immutable update
+    saveDB({ ...db, exams: [...db.exams, newExam] });
     return Promise.resolve(newExam);
 };
 
 export const updateExam = (updatedExam: Exam): Promise<Exam> => {
-    db.exams = db.exams.map(exam => exam.id === updatedExam.id ? updatedExam : exam); // Immutable update
+    const newExams = db.exams.map(exam => exam.id === updatedExam.id ? updatedExam : exam);
+    saveDB({ ...db, exams: newExams });
     return Promise.resolve(updatedExam);
 };
 
 export const deleteExam = (examId: string): Promise<boolean> => {
     const initialLength = db.exams.length;
-    db.exams = db.exams.filter(e => e.id !== examId); // Immutable update
-    return Promise.resolve(db.exams.length < initialLength);
+    const newExams = db.exams.filter(e => e.id !== examId);
+    const wasDeleted = newExams.length < initialLength;
+    if (wasDeleted) {
+        saveDB({ ...db, exams: newExams });
+    }
+    return Promise.resolve(wasDeleted);
 };
 
 export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): SeatingPlan | null => {
