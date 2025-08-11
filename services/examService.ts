@@ -73,6 +73,21 @@ const loadDB = (): AppDB => {
 // Initialize the database when the module is first loaded.
 db = loadDB();
 
+// --- Data Management Functions ---
+export const getDatabaseState = (): Promise<AppDB> => {
+    return Promise.resolve(db);
+};
+
+export const importDatabaseState = (newState: any): Promise<boolean> => {
+    // Basic validation to ensure the structure is roughly correct.
+    if (newState && typeof newState === 'object' && newState !== null && Array.isArray(newState.users) && Array.isArray(newState.exams)) {
+        saveDB(newState as AppDB);
+        return Promise.resolve(true);
+    }
+    console.error("Import failed: Invalid data structure.", newState);
+    return Promise.resolve(false);
+};
+
 
 // --- User Management Functions (Synchronous, returning Promises) ---
 
@@ -246,75 +261,83 @@ export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): S
             }
         }
     });
-    
+
     const assignedSeats: { [key: string]: Seat } = {};
-    
+
     // Create a map of set IDs to their SORTED student lists
     const studentsBySet = studentSets.reduce((acc, set) => {
-      // Sort students by register number instead of shuffling
-      const sortedStudents = [...set.students].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      acc[set.id] = sortedStudents.map((studentId, i) => ({
-        id: studentId, // The actual register number
-        setId: set.id,
-        setNumber: i + 1, // A sequence number within the set
-      }));
-      return acc;
+        const sortedStudents = [...set.students].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        acc[set.id] = sortedStudents.map((studentId, i) => ({
+            id: studentId, // The actual register number
+            setId: set.id,
+            setNumber: i + 1, // A sequence number within the set
+        }));
+        return acc;
     }, {} as Record<string, { id: string; setId: string; setNumber: number }[]>);
-    
-    const activeStudentSets = studentSets.filter(set => set.students.length > 0);
 
-    const useSpacedLayout = activeStudentSets.length === 1 && (() => {
-        const studentsToPlace = studentsBySet[activeStudentSets[0].id];
-        const requiredSeatsForSpacing = studentsToPlace.length * 2 - (studentsToPlace.length > 0 ? 1 : 0);
-        return totalSeats >= requiredSeatsForSpacing;
-    })();
-
-    if (useSpacedLayout) {
-        const singleSet = activeStudentSets[0];
-        const studentsToPlace = studentsBySet[singleSet.id];
-        let seatIndex = 0;
-        for (const studentToAssign of studentsToPlace) {
-            if (seatIndex < allSeats.length) {
-                const seat = allSeats[seatIndex];
-                seat.student = studentToAssign;
-                assignedSeats[`${seat.hallId}-${seat.row}-${seat.col}`] = seat;
-                seatIndex += 2; // Skip the next seat
+    // Create an interleaved list of all students to ensure separation
+    const interleavedStudents: { id: string; setId: string; setNumber: number }[] = [];
+    const setsWithStudents = studentSets.filter(s => s.students.length > 0);
+    let studentIndex = 0;
+    let moreStudentsToInterleave = true;
+    while (moreStudentsToInterleave) {
+        moreStudentsToInterleave = false;
+        for (const set of setsWithStudents) {
+            if (studentIndex < studentsBySet[set.id].length) {
+                interleavedStudents.push(studentsBySet[set.id][studentIndex]);
+                moreStudentsToInterleave = true;
             }
         }
-    } else {
-        // Default logic for multiple sets, or for a single set without enough room to be spaced out.
-        const studentSetsRotator = [...studentSets].filter(set => set.students.length > 0);
-        let setIndex = 0;
-        let studentPlacedCount = 0;
-        
-        // Assign students to seats
-        for (let i = 0; i < allSeats.length && studentPlacedCount < totalStudents; i++) {
-            const seat = allSeats[i];
-            
-            const setsWithStudents = studentSets.filter(set => (studentsBySet[set.id]?.length || 0) > 0);
+        studentIndex++;
+    }
 
-            if (setsWithStudents.length > 0) {
-                let assigned = false;
-                let attempts = 0;
-                // Rotate through sets to ensure students from the same set are separated.
-                while(!assigned && attempts < studentSetsRotator.length) {
-                    const currentSetId = studentSetsRotator[setIndex % studentSetsRotator.length].id;
-                    
-                    if (studentsBySet[currentSetId]?.length > 0) {
-                        const studentToAssign = studentsBySet[currentSetId].shift()!;
-                        seat.student = studentToAssign;
+    let seatIndex = 0;
+    // Iterate through the interleaved students and place them
+    for (let i = 0; i < interleavedStudents.length; i++) {
+        if (seatIndex >= allSeats.length) break; // No more seats
+
+        // Check if all remaining students are from the same set
+        const remainingStudents = interleavedStudents.slice(i);
+        const firstRemainingSetId = remainingStudents[0].setId;
+        const allFromSameSet = remainingStudents.every(s => s.setId === firstRemainingSetId);
+
+        if (allFromSameSet) {
+            const remainingSeatsCount = allSeats.length - seatIndex;
+            const requiredSeatsForSpacing = remainingStudents.length * 2 - (remainingStudents.length > 0 ? 1 : 0);
+
+            if (remainingSeatsCount >= requiredSeatsForSpacing) {
+                // Final set with enough space for spacing
+                for (const studentToPlace of remainingStudents) {
+                    if (seatIndex < allSeats.length) {
+                        const seat = allSeats[seatIndex];
+                        seat.student = studentToPlace;
                         assignedSeats[`${seat.hallId}-${seat.row}-${seat.col}`] = seat;
-                        studentPlacedCount++;
-                        assigned = true;
+                        seatIndex += 2; // Skip a seat
                     }
-                    
-                    setIndex++;
-                    attempts++;
+                }
+            } else {
+                // Final set but not enough space, so fill normally
+                for (const studentToPlace of remainingStudents) {
+                    if (seatIndex < allSeats.length) {
+                        const seat = allSeats[seatIndex];
+                        seat.student = studentToPlace;
+                        assignedSeats[`${seat.hallId}-${seat.row}-${seat.col}`] = seat;
+                        seatIndex++;
+                    }
                 }
             }
+            // All remaining students have been placed, so we exit the main loop.
+            break;
+        } else {
+            // Multiple sets remain, place students one by one
+            const studentToPlace = interleavedStudents[i];
+            const seat = allSeats[seatIndex];
+            seat.student = studentToPlace;
+            assignedSeats[`${seat.hallId}-${seat.row}-${seat.col}`] = seat;
+            seatIndex++;
         }
     }
-    
+
     // Reconstruct the seating plan into a 2D array for each hall
     const finalPlan: SeatingPlan = {};
     halls.forEach(hall => {
