@@ -28,7 +28,6 @@ export interface SeatDefinition {
 export interface HallConstraint {
     type: 'no-limit' | 'advanced';
     allowedSetIds?: string[];
-    arrangement?: 'horizontal' | 'vertical';
 }
 
 export interface Hall {
@@ -72,6 +71,7 @@ export interface Exam {
     adminId: string;
 }
 
+// FIX: Define and export the StudentInfo interface to resolve the import error.
 export interface StudentInfo {
     id: string; // This will now be the actual student register number
     setId: string;

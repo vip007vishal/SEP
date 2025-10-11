@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -7,11 +6,288 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smart Exam Planner</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {},
+        },
+      }
+    </script>
     <style>
       body {
         font-family: 'Inter', sans-serif;
       }
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+      
+      /* Input color fix for all light themes */
+      html:not(.dark) input,
+      html:not(.dark) select,
+      html:not(.dark) textarea {
+        background-color: #ffffff;
+        color: #1e293b; /* slate-800, a neutral dark color for text */
+      }
+
+      /* Dark Theme (Blue Accent) Overrides */
+      /* This targets the default dark theme, but not the pure black theme. */
+      html.dark:not(.black) .dark\:text-violet-400,
+      html.dark:not(.black) .text-violet-700,
+      html.dark:not(.black) .text-violet-600 {
+        color: #38bdf8; /* sky-400 */
+      }
+      
+      html.dark:not(.black) .dark\:hover\:text-violet-400:hover,
+      html.dark:not(.black) .hover\:text-violet-700:hover,
+      html.dark:not(.black) .hover\:text-violet-600:hover,
+      html.dark:not(.black) .hover\:text-violet-500:hover {
+        color: #7dd3fc; /* sky-300 */
+      }
+      
+      html.dark:not(.black) .bg-violet-600 {
+        background-color: #0ea5e9; /* sky-500 */
+      }
+      html.dark:not(.black) .hover\:bg-violet-700:hover {
+        background-color: #0284c7; /* sky-600 */
+      }
+
+      html.dark:not(.black) .dark\:focus\:ring-violet-400:focus,
+      html.dark:not(.black) .focus\:ring-violet-500:focus {
+        --tw-ring-color: #38bdf8; /* sky-400 */
+      }
+
+      html.dark:not(.black) .dark\:bg-violet-500\/10,
+      html.dark:not(.black) .bg-violet-50 {
+        background-color: rgba(14, 165, 233, 0.1); /* sky-500/10 */
+      }
+
+      html.dark:not(.black) .dark\:ring-violet-400 {
+        --tw-ring-color: #38bdf8;
+      }
+      
+      html.dark:not(.black) .dark\:border-violet-400 {
+        border-color: #38bdf8; /* sky-400 */
+      }
+
+      /* Pure Black Theme Overrides */
+      html.black .dark\:bg-slate-900 { background-color: #000000; }
+      html.black body { background-color: #000000; color: #e5e7eb; }
+      html.black .dark\:bg-slate-800 { background-color: #111111; }
+      html.black .dark\:bg-slate-700 { background-color: #1f1f1f; }
+      html.black .dark\:bg-slate-700\/50 { background-color: rgba(31, 31, 31, 0.5); }
+      html.black .dark\:text-slate-200 { color: #e5e7eb; }
+      html.black .dark\:text-slate-300 { color: #d1d5db; }
+      html.black .dark\:text-slate-400 { color: #9ca3af; }
+      html.black .dark\:border-slate-700 { border-color: #374151; }
+      html.black .dark\:border-slate-600 { border-color: #4b5563; }
+      html.black .dark\:shadow-none { box-shadow: none; }
+      html.black .dark\:hover\:bg-slate-700:hover { background-color: #374151; }
+      html.black .dark\:hover\:bg-slate-600:hover { background-color: #4b5563; }
+      
+      /* Black Theme Accent Overrides (Grey) */
+      html.black .text-violet-700,
+      html.black .dark\:text-violet-400,
+      html.black .text-violet-600 { color: #d1d5db; } /* slate-300 */
+      html.black .dark\:hover\:text-violet-400:hover { color: #f9fafb; } /* slate-50 */
+      html.black .bg-violet-600 { background-color: #334155; } /* slate-700 */
+      html.black .hover\:bg-violet-700:hover { background-color: #475569; } /* slate-600 */
+      html.black .focus\:ring-violet-500:focus,
+      html.black .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #64748b; } /* slate-500 */
+      html.black .dark\:bg-violet-500\/10,
+      html.black .bg-violet-50 { background-color: rgba(51, 65, 85, 0.5); } /* slate-700/50 */
+      
+      html.black .dark\:bg-red-500\/20 { background-color: rgba(239, 68, 68, 0.2); }
+      html.black .dark\:text-red-300 { color: #fca5a5; }
+      html.black .dark\:bg-green-500\/20 { background-color: rgba(34, 197, 94, 0.2); }
+      html.black .dark\:text-green-300 { color: #86efac; }
+      html.black .dark\:bg-amber-500\/20 { background-color: rgba(245, 158, 11, 0.2); }
+      html.black .dark\:text-amber-300 { color: #fcd34d; }
+
+      /* Visualizer base seat overrides for black theme */
+      html.black .dark\:bg-slate-800 { background-color: #111111; }
+      html.black .dark\:bg-slate-600 { background-color: #2a2a2a; }
+      html.black .dark\:border-slate-500 { border-color: #555555; }
+      html.black .dark\:bg-blue-600 { background-color: #1e40af; } /* blue-800 */
+      html.black .dark\:bg-yellow-600 { background-color: #b45309; } /* amber-700 */
+      html.black .dark\:text-slate-900 { color: #ffffff; }
+      html.black .dark\:bg-slate-700 { background-color: #2f2f2f; }
+      
+      /* Visualizer student seat overrides for black theme */
+      html.black .bg-sky-200 { background-color: #075985; } /* sky-800 */
+      html.black .bg-emerald-200 { background-color: #065f46; } /* emerald-800 */
+      html.black .bg-amber-200 { background-color: #92400e; } /* amber-800 */
+      html.black .bg-violet-200 { background-color: #5b21b6; } /* violet-800 */
+      html.black .bg-rose-200 { background-color: #881337; } /* rose-800 */
+      html.black .bg-cyan-200 { background-color: #155e75; } /* cyan-800 */
+      html.black .bg-lime-200 { background-color: #3f6212; } /* lime-800 */
+      html.black .bg-orange-200 { background-color: #9a3412; } /* orange-800 */
+      html.black .bg-purple-200 { background-color: #6b21a8; } /* purple-800 */
+      html.black .bg-pink-200 { background-color: #9d174d; } /* pink-800 */
+
+      /* Lavender Theme Overrides */
+      html.lavender body { background-color: #f5f3ff; color: #334155; } /* bg-violet-50, text-slate-700 */
+      html.lavender .bg-slate-50,
+      html.lavender .dark\:bg-slate-900 { background-color: #f5f3ff; } /* body bg */
+
+      /* Cards, Headers, Modals */
+      html.lavender .bg-white,
+      html.lavender .dark\:bg-slate-800 { background-color: #ffffff; }
+
+      /* Borders */
+      html.lavender .border-transparent { border-color: transparent; }
+      html.lavender .border-slate-200,
+      html.lavender .border-slate-300,
+      html.lavender .dark\:border-slate-700,
+      html.lavender .dark\:border-slate-600 { border-color: #ddd6fe; } /* violet-200 */
+      
+      /* Text */
+      html.lavender .text-slate-800,
+      html.lavender .dark\:text-slate-200 { color: #334155; } /* slate-700 */
+      html.lavender .text-slate-600,
+      html.lavender .dark\:text-slate-300 { color: #475569; } /* slate-600 */
+      html.lavender .text-slate-500,
+      html.lavender .dark\:text-slate-400 { color: #64748b; } /* slate-500 */
+      
+      /* Accent Colors (Violet) */
+      html.lavender .text-violet-700,
+      html.lavender .dark\:text-violet-400 { color: #7c3aed; } /* violet-600 */
+      html.lavender .text-violet-600 { color: #8b5cf6; } /* violet-500 */
+      html.lavender .bg-violet-600 { background-color: #8b5cf6; } /* violet-500 */
+      html.lavender .hover\:bg-violet-700:hover { background-color: #7c3aed; } /* violet-600 */
+      html.lavender .dark\:hover\:text-violet-400:hover { color: #7c3aed; }
+      html.lavender .focus\:ring-violet-500:focus,
+      html.lavender .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #8b5cf6; } /* violet-500 */
+      html.lavender .dark\:bg-violet-500\/10,
+      html.lavender .bg-violet-50 { background-color: rgba(139, 92, 246, 0.1); }
+      
+      /* Secondary / Subtle Backgrounds */
+      html.lavender .bg-slate-100,
+      html.lavender .dark\:bg-slate-700\/50 { background-color: #f5f3ff; } /* violet-50 */
+      html.lavender .bg-slate-200,
+      html.lavender .dark\:bg-slate-700 { background-color: #ede9fe; } /* violet-100 */
+      html.lavender .hover\:bg-slate-200:hover { background-color: #f5f3ff; }
+      html.lavender .hover\:bg-slate-300:hover,
+      html.lavender .dark\:hover\:bg-slate-700:hover,
+      html.lavender .dark\:hover\:bg-slate-600:hover { background-color: #ddd6fe; } /* violet-200 */
+      
+      /* Tag colors (maintain contrast) */
+      html.lavender .dark\:bg-red-500\/20 { background-color: rgba(239, 68, 68, 0.1); }
+      html.lavender .dark\:text-red-300 { color: #ef4444; }
+      html.lavender .dark\:bg-green-500\/20 { background-color: rgba(34, 197, 94, 0.1); }
+      html.lavender .dark\:text-green-300 { color: #16a34a; }
+      html.lavender .dark\:bg-amber-500\/20 { background-color: rgba(245, 158, 11, 0.1); }
+      html.lavender .dark\:text-amber-300 { color: #d97706; }
+      
+      /* Visualizer overrides for lavender theme */
+      html.lavender .dark\:bg-slate-600 { background-color: #ede9fe; } /* Standard Seat: violet-100 */
+      html.lavender .dark\:border-slate-500 { border-color: #c4b5fd; } /* violet-300 */
+      html.lavender .dark\:bg-blue-600 { background-color: #93c5fd; } /* Accessible Seat: blue-300 */
+      html.lavender .dark\:bg-yellow-600 { background-color: #fde047; } /* Faculty Seat: yellow-300 */
+      html.lavender .dark\:text-slate-900 { color: #1e293b; } /* slate-800 */
+
+      /* Light Blue Theme Overrides */
+      html.lightblue body { background-color: #f0f9ff; color: #1e3a8a; } /* bg-sky-50, text-blue-900 */
+      html.lightblue .bg-slate-50, html.lightblue .dark\:bg-slate-900 { background-color: #f0f9ff; }
+      html.lightblue .bg-white, html.lightblue .dark\:bg-slate-800 { background-color: #ffffff; }
+      html.lightblue .border-slate-200, html.lightblue .border-slate-300, html.lightblue .dark\:border-slate-700, html.lightblue .dark\:border-slate-600 { border-color: #dbeafe; } /* blue-200 */
+      html.lightblue .text-slate-800, html.lightblue .dark\:text-slate-200 { color: #1e3a8a; }
+      html.lightblue .text-slate-600, html.lightblue .dark\:text-slate-300 { color: #1d4ed8; }
+      html.lightblue .text-slate-500, html.lightblue .dark\:text-slate-400 { color: #2563eb; }
+      html.lightblue .text-violet-700, html.lightblue .dark\:text-violet-400 { color: #1d4ed8; }
+      html.lightblue .text-violet-600, html.lightblue .bg-violet-600 { background-color: #2563eb; color: white; }
+      html.lightblue .hover\:bg-violet-700:hover { background-color: #1d4ed8; }
+      html.lightblue .dark\:hover\:text-violet-400:hover { color: #1d4ed8; }
+      html.lightblue .focus\:ring-violet-500:focus, html.lightblue .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #3b82f6; }
+      html.lightblue .dark\:bg-violet-500\/10, html.lightblue .bg-violet-50 { background-color: rgba(59, 130, 246, 0.1); }
+      html.lightblue .bg-slate-100, html.lightblue .dark\:bg-slate-700\/50 { background-color: #f0f9ff; }
+      html.lightblue .bg-slate-200, html.lightblue .dark\:bg-slate-700 { background-color: #e0f2fe; }
+      html.lightblue .hover\:bg-slate-200:hover, html.lightblue .hover\:bg-slate-300:hover, html.lightblue .dark\:hover\:bg-slate-700:hover, html.lightblue .dark\:hover\:bg-slate-600:hover { background-color: #dbeafe; }
+      html.lightblue .dark\:bg-slate-600 { background-color: #dbeafe; } /* Standard Seat: blue-200 */
+      html.lightblue .dark\:border-slate-500 { border-color: #93c5fd; } /* blue-300 */
+      html.lightblue .dark\:text-slate-900 { color: #1e293b; }
+
+      /* Lime Green Theme Overrides */
+      html.limegreen body { background-color: #f7fee7; color: #365314; } /* bg-lime-50, text-lime-900 */
+      html.limegreen .bg-slate-50, html.limegreen .dark\:bg-slate-900 { background-color: #f7fee7; }
+      html.limegreen .bg-white, html.limegreen .dark\:bg-slate-800 { background-color: #ffffff; }
+      html.limegreen .border-slate-200, html.limegreen .border-slate-300, html.limegreen .dark\:border-slate-700, html.limegreen .dark\:border-slate-600 { border-color: #d9f99d; } /* lime-200 */
+      html.limegreen .text-slate-800, html.limegreen .dark\:text-slate-200 { color: #365314; }
+      html.limegreen .text-slate-600, html.limegreen .dark\:text-slate-300 { color: #4d7c0f; }
+      html.limegreen .text-slate-500, html.limegreen .dark\:text-slate-400 { color: #65a30d; }
+      html.limegreen .text-violet-700, html.limegreen .dark\:text-violet-400 { color: #65a30d; }
+      html.limegreen .text-violet-600, html.limegreen .bg-violet-600 { background-color: #84cc16; color: #1a2e05; }
+      html.limegreen .hover\:bg-violet-700:hover { background-color: #65a30d; }
+      html.limegreen .dark\:hover\:text-violet-400:hover { color: #65a30d; }
+      html.limegreen .focus\:ring-violet-500:focus, html.limegreen .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #84cc16; }
+      html.limegreen .dark\:bg-violet-500\/10, html.limegreen .bg-violet-50 { background-color: rgba(132, 204, 22, 0.1); }
+      html.limegreen .bg-slate-100, html.limegreen .dark\:bg-slate-700\/50 { background-color: #f7fee7; }
+      html.limegreen .bg-slate-200, html.limegreen .dark\:bg-slate-700 { background-color: #ecfccb; }
+      html.limegreen .hover\:bg-slate-200:hover, html.limegreen .hover\:bg-slate-300:hover, html.limegreen .dark\:hover\:bg-slate-700:hover, html.limegreen .dark\:hover\:bg-slate-600:hover { background-color: #d9f99d; }
+      html.limegreen .dark\:bg-slate-600 { background-color: #d9f99d; } /* Standard Seat: lime-200 */
+      html.limegreen .dark\:border-slate-500 { border-color: #bef264; } /* lime-300 */
+      html.limegreen .dark\:text-slate-900 { color: #1a2e05; }
+      
+      /* Light Red Theme Overrides */
+      html.lightred body { background-color: #fff1f2; color: #881337; } /* bg-rose-50, text-rose-900 */
+      html.lightred .bg-slate-50, html.lightred .dark\:bg-slate-900 { background-color: #fff1f2; }
+      html.lightred .bg-white, html.lightred .dark\:bg-slate-800 { background-color: #ffffff; }
+      html.lightred .border-slate-200, html.lightred .border-slate-300, html.lightred .dark\:border-slate-700, html.lightred .dark\:border-slate-600 { border-color: #fecdd3; } /* rose-200 */
+      html.lightred .text-slate-800, html.lightred .dark\:text-slate-200 { color: #881337; }
+      html.lightred .text-slate-600, html.lightred .dark\:text-slate-300 { color: #9f1239; }
+      html.lightred .text-slate-500, html.lightred .dark\:text-slate-400 { color: #be123c; }
+      html.lightred .text-violet-700, html.lightred .dark\:text-violet-400 { color: #be123c; }
+      html.lightred .text-violet-600, html.lightred .bg-violet-600 { background-color: #e11d48; color: white; }
+      html.lightred .hover\:bg-violet-700:hover { background-color: #be123c; }
+      html.lightred .dark\:hover\:text-violet-400:hover { color: #be123c; }
+      html.lightred .focus\:ring-violet-500:focus, html.lightred .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #f43f5e; }
+      html.lightred .dark\:bg-violet-500\/10, html.lightred .bg-violet-50 { background-color: rgba(225, 29, 72, 0.1); }
+      html.lightred .bg-slate-100, html.lightred .dark\:bg-slate-700\/50 { background-color: #fff1f2; }
+      html.lightred .bg-slate-200, html.lightred .dark\:bg-slate-700 { background-color: #ffe4e6; }
+      html.lightred .hover\:bg-slate-200:hover, html.lightred .hover\:bg-slate-300:hover, html.lightred .dark\:hover\:bg-slate-700:hover, html.lightred .dark\:hover\:bg-slate-600:hover { background-color: #fecdd3; }
+      html.lightred .dark\:bg-slate-600 { background-color: #fecdd3; } /* Standard Seat: rose-200 */
+      html.lightred .dark\:border-slate-500 { border-color: #fda4af; } /* rose-300 */
+      html.lightred .dark\:text-slate-900 { color: #881337; }
+
+      /* Light Yellow Theme Overrides */
+      html.lightyellow body { background-color: #fefce8; color: #713f12; } /* bg-yellow-50, text-yellow-900 */
+      html.lightyellow .bg-slate-50, html.lightyellow .dark\:bg-slate-900 { background-color: #fefce8; }
+      html.lightyellow .bg-white, html.lightyellow .dark\:bg-slate-800 { background-color: #ffffff; }
+      html.lightyellow .border-slate-200, html.lightyellow .border-slate-300, html.lightyellow .dark\:border-slate-700, html.lightyellow .dark\:border-slate-600 { border-color: #fde68a; } /* yellow-200 */
+      html.lightyellow .text-slate-800, html.lightyellow .dark\:text-slate-200 { color: #713f12; }
+      html.lightyellow .text-slate-600, html.lightyellow .dark\:text-slate-300 { color: #854d0e; }
+      html.lightyellow .text-slate-500, html.lightyellow .dark\:text-slate-400 { color: #a16207; }
+      html.lightyellow .text-violet-700, html.lightyellow .dark\:text-violet-400 { color: #a16207; }
+      html.lightyellow .text-violet-600, html.lightyellow .bg-violet-600 { background-color: #eab308; color: #422006; }
+      html.lightyellow .hover\:bg-violet-700:hover { background-color: #ca8a04; }
+      html.lightyellow .dark\:hover\:text-violet-400:hover { color: #ca8a04; }
+      html.lightyellow .focus\:ring-violet-500:focus, html.lightyellow .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #facc15; }
+      html.lightyellow .dark\:bg-violet-500\/10, html.lightyellow .bg-violet-50 { background-color: rgba(234, 179, 8, 0.1); }
+      html.lightyellow .bg-slate-100, html.lightyellow .dark\:bg-slate-700\/50 { background-color: #fefce8; }
+      html.lightyellow .bg-slate-200, html.lightyellow .dark\:bg-slate-700 { background-color: #fef9c3; }
+      html.lightyellow .hover\:bg-slate-200:hover, html.lightyellow .hover\:bg-slate-300:hover, html.lightyellow .dark\:hover\:bg-slate-700:hover, html.lightyellow .dark\:hover\:bg-slate-600:hover { background-color: #fde68a; }
+      html.lightyellow .dark\:bg-slate-600 { background-color: #fde68a; } /* Standard Seat: yellow-200 */
+      html.lightyellow .dark\:border-slate-500 { border-color: #fcd34d; } /* yellow-300 */
+      html.lightyellow .dark\:text-slate-900 { color: #713f12; }
+
+      /* Light Pink Theme Overrides */
+      html.lightpink body { background-color: #fdf2f8; color: #831843; } /* bg-pink-50, text-pink-900 */
+      html.lightpink .bg-slate-50, html.lightpink .dark\:bg-slate-900 { background-color: #fdf2f8; }
+      html.lightpink .bg-white, html.lightpink .dark\:bg-slate-800 { background-color: #ffffff; }
+      html.lightpink .border-slate-200, html.lightpink .border-slate-300, html.lightpink .dark\:border-slate-700, html.lightpink .dark\:border-slate-600 { border-color: #fce7f3; } /* pink-200 */
+      html.lightpink .text-slate-800, html.lightpink .dark\:text-slate-200 { color: #831843; }
+      html.lightpink .text-slate-600, html.lightpink .dark\:text-slate-300 { color: #9d174d; }
+      html.lightpink .text-slate-500, html.lightpink .dark\:text-slate-400 { color: #be185d; }
+      html.lightpink .text-violet-700, html.lightpink .dark\:text-violet-400 { color: #db2777; }
+      html.lightpink .text-violet-600, html.lightpink .bg-violet-600 { background-color: #ec4899; color: white; }
+      html.lightpink .hover\:bg-violet-700:hover { background-color: #db2777; }
+      html.lightpink .dark\:hover\:text-violet-400:hover { color: #db2777; }
+      html.lightpink .focus\:ring-violet-500:focus, html.lightpink .dark\:focus\:ring-violet-400:focus { --tw-ring-color: #f472b6; }
+      html.lightpink .dark\:bg-violet-500\/10, html.lightpink .bg-violet-50 { background-color: rgba(236, 72, 153, 0.1); }
+      html.lightpink .bg-slate-100, html.lightpink .dark\:bg-slate-700\/50 { background-color: #fdf2f8; }
+      html.lightpink .bg-slate-200, html.lightpink .dark\:bg-slate-700 { background-color: #fce7f3; }
+      html.lightpink .hover\:bg-slate-200:hover, html.lightpink .hover\:bg-slate-300:hover, html.lightpink .dark\:hover\:bg-slate-700:hover, html.lightpink .dark\:hover\:bg-slate-600:hover { background-color: #fbcfe8; }
+      html.lightpink .dark\:bg-slate-600 { background-color: #fce7f3; } /* Standard Seat: pink-200 */
+      html.lightpink .dark\:border-slate-500 { border-color: #fbcfe8; } /* pink-300 */
+      html.lightpink .dark\:text-slate-900 { color: #831843; }
     </style>
   <script type="importmap">
 {
@@ -19,14 +295,15 @@
     "react-router-dom": "https://esm.sh/react-router-dom@^7.7.1",
     "react/": "https://esm.sh/react@^19.1.1/",
     "react": "https://esm.sh/react@^19.1.1",
-    "react-dom/": "https://esm.sh/react-dom@^19.1.1/"
+    "react-dom/": "https://esm.sh/react-dom@^19.1.1/",
+    "html2canvas": "https://esm.sh/html2canvas@1.4.1",
+    "xlsx": "https://esm.sh/xlsx@0.18.5"
   }
 }
 </script>
-<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-slate-50 text-slate-800">
+  <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
   </body>

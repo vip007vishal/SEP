@@ -1,7 +1,7 @@
-
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { Role } from './types';
 
 import Login from './components/Login';
@@ -47,11 +47,13 @@ const AppRoutes: React.FC = () => {
 
 const App: React.FC = () => {
     return (
-        <AuthProvider>
-            <HashRouter>
-                <AppRoutes />
-            </HashRouter>
-        </AuthProvider>
+        <ThemeProvider>
+            <AuthProvider>
+                <HashRouter>
+                    <AppRoutes />
+                </HashRouter>
+            </AuthProvider>
+        </ThemeProvider>
     );
 };
 
