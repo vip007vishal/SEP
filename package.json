@@ -1,5 +1,5 @@
 {
-  "name": "3-sep-oct10",
+  "name": "sep-oct26",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,7 +13,8 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "html2canvas": "1.4.1",
-    "xlsx": "0.18.5"
+    "xlsx": "0.18.5",
+    "@google/genai": "latest"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

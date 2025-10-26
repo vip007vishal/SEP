@@ -3,7 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint } from '../types';
 import { 
     getExamsForTeacher, 
-    generateSeatingPlan, 
+    generateSeatingPlan,
+    generateClassicSeatingPlan,
     updateExam, 
     createExam, 
     deleteExam, 
@@ -18,6 +19,7 @@ import Header from './common/Header';
 import Card from './common/Card';
 import Button from './common/Button';
 import Input from './common/Input';
+import Textarea from './common/Textarea';
 import SeatingPlanVisualizer from './common/SeatingPlanVisualizer';
 import HallLayoutEditor from './common/HallLayoutEditor';
 import html2canvas from 'html2canvas';
@@ -58,6 +60,19 @@ const ExcelIcon: React.FC<{className?: string}> = ({className}) => (
         <path d="M21.16,3.16a1.2,1.2,0,0,0-.81-.29H3.65A1.2,1.2,0,0,0,2.45,4.07V19.93a1.2,1.2,0,0,0,1.2,1.2h16.7a1.2,1.2,0,0,0,1.2-1.2V4.07a1.2,1.2,0,0,0-.39-.91ZM14.21,12.19,11.83,15a.34.34,0,0,1-.31.18.33.33,0,0,1-.3-.17l-2.4-2.82a.33.33,0,0,1,.24-.53h1.37a.33.33,0,0,1,.3.17l1,1.18,1-1.18a.33.33,0,0,1,.3-.17h1.37a.33.33,0,0,1,.24.53Z"/>
     </svg>
 );
+
+const SparklesIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    </svg>
+);
+
+const GridIcon: React.FC<{className?: string}> = ({className}) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={`h-6 w-6 ${className}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+    </svg>
+);
+
 
 const isSimpleGrid = (layout: SeatDefinition[]): { isGrid: true; rows: number; cols: number } | { isGrid: false } => {
     if (layout.length === 0) {
@@ -119,6 +134,7 @@ const TeacherDashboard: React.FC = () => {
     // State for quick actions on the dashboard
     const [generatingPlanId, setGeneratingPlanId] = useState<string | null>(null);
     const [downloadingExamId, setDownloadingExamId] = useState<string | null>(null);
+    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
     const downloadRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
     // Student Set Template Form State
@@ -131,6 +147,8 @@ const TeacherDashboard: React.FC = () => {
     const [savingTemplateForSetId, setSavingTemplateForSetId] = useState<string | null>(null);
     const [recentlySavedSetIds, setRecentlySavedSetIds] = useState<string[]>([]);
 
+    const [activeTab, setActiveTab] = useState<'ai' | 'classic'>('ai');
+
 
     const initialNewExamState: FormExam = {
         id: '',
@@ -138,6 +156,9 @@ const TeacherDashboard: React.FC = () => {
         date: '',
         halls: [],
         studentSets: [],
+        aiSeatingRules: '',
+        seatingType: 'normal',
+        editorMode: 'ai',
         createdBy: user?.id || '',
         adminId: user?.adminId || ''
     };
@@ -177,9 +198,19 @@ const TeacherDashboard: React.FC = () => {
     }, [fetchExams, fetchHallTemplates, fetchStudentSetTemplates, user]);
 
     // --- Form State Handlers ---
-    const handleFormChange = (field: 'title' | 'date', value: string) => {
+    const handleFormChange = (field: 'title' | 'date' | 'aiSeatingRules', value: string) => {
         if (!activeExam) return;
         setActiveExam(prev => prev ? { ...prev, [field]: value } : null);
+    };
+
+    const handleEditorModeChange = (mode: 'ai' | 'classic') => {
+        if (!activeExam) return;
+        setActiveExam(prev => prev ? { ...prev, editorMode: mode } : null);
+    };
+
+    const handleSeatingTypeChange = (type: 'normal' | 'fair') => {
+        if (!activeExam) return;
+        setActiveExam(prev => prev ? { ...prev, seatingType: type } : null);
     };
 
     const handleHallNameChange = (index: number, name: string) => {
@@ -280,7 +311,7 @@ const TeacherDashboard: React.FC = () => {
         setActiveExam(prev => prev ? { ...prev, halls: prev.halls.filter((_, i) => i !== index) } : null);
     };
 
-    const handleConstraintTypeChange = (hallIndex: number, type: HallConstraint['type']) => {
+    const handleConstraintTypeChange = (hallIndex: number, type: 'no-limit' | 'advanced') => {
         if (!activeExam) return;
         const updatedHalls = [...activeExam.halls];
         const currentHall = updatedHalls[hallIndex];
@@ -632,7 +663,11 @@ const TeacherDashboard: React.FC = () => {
             if(originalExam) {
                  const hallsChanged = JSON.stringify(parsedExamData.halls) !== JSON.stringify(originalExam.halls);
                  const setsChanged = JSON.stringify(parsedExamData.studentSets) !== JSON.stringify(originalExam.studentSets);
-                 if ((hallsChanged || setsChanged) && parsedExamData.seatingPlan) {
+                 const rulesChanged = parsedExamData.aiSeatingRules !== originalExam.aiSeatingRules;
+                 const typeChanged = parsedExamData.seatingType !== originalExam.seatingType;
+                 const editorModeChanged = parsedExamData.editorMode !== originalExam.editorMode;
+
+                 if ((hallsChanged || setsChanged || rulesChanged || typeChanged || editorModeChanged) && parsedExamData.seatingPlan) {
                     parsedExamData.seatingPlan = undefined;
                  }
             }
@@ -646,7 +681,10 @@ const TeacherDashboard: React.FC = () => {
                 title: parsedExamData.title,
                 date: parsedExamData.date,
                 halls: parsedExamData.halls,
-                studentSets: parsedExamData.studentSets
+                studentSets: parsedExamData.studentSets,
+                aiSeatingRules: parsedExamData.aiSeatingRules,
+                seatingType: parsedExamData.seatingType,
+                editorMode: parsedExamData.editorMode,
             }, user.id);
         }
         
@@ -663,11 +701,25 @@ const TeacherDashboard: React.FC = () => {
         const parsedExamData = validateAndParseForm();
         if (!parsedExamData) return;
         
-        const result = generateSeatingPlan(parsedExamData.halls as Hall[], parsedExamData.studentSets as StudentSet[]);
+        setIsLoading(true);
+
+        let result;
+        if (activeExam.editorMode === 'classic') {
+            result = await generateClassicSeatingPlan({
+                halls: parsedExamData.halls as Hall[], 
+                studentSets: parsedExamData.studentSets as StudentSet[], 
+            });
+        } else { // 'ai' mode
+            result = await generateSeatingPlan({
+                halls: parsedExamData.halls as Hall[], 
+                studentSets: parsedExamData.studentSets as StudentSet[], 
+                rules: parsedExamData.aiSeatingRules || '',
+                seatingType: parsedExamData.seatingType || 'normal'
+            });
+        }
         
         if (result.plan) {
             const examWithPlan = { ...parsedExamData, id: parsedExamData.id || `exam${Date.now()}`, seatingPlan: result.plan } as Exam;
-            setIsLoading(true);
             
             await updateExam(examWithPlan);
             await fetchExams();
@@ -680,13 +732,14 @@ const TeacherDashboard: React.FC = () => {
                 studentSets: examWithPlan.studentSets, // Use parsed sets
             };
             setActiveExam(updatedActiveExam);
-            setIsLoading(false);
+            
             if (result.message) {
                 setFormWarning(result.message);
             }
         } else {
-            setFormError(result.message || 'Failed to generate seating plan. Not enough seats for all students. Please add more hall space or reduce the number of students.');
+            setFormError(result.message || 'Failed to generate seating plan. Please check your configuration and try again.');
         }
+        setIsLoading(false);
     };
 
     const handleDownloadPng = async (hallId: string, hallName: string) => {
@@ -750,6 +803,78 @@ const TeacherDashboard: React.FC = () => {
         XLSX.writeFile(wb, `${sanitizedTitle}_${sanitizedHallName}_plan.xlsx`);
     };
 
+    const handleDownloadAllPngsFromEditor = async () => {
+        if (!activeExam || !activeExam.seatingPlan) return;
+        
+        setIsDownloadingAll(true);
+        setFormError('');
+
+        for (const hall of activeExam.halls) {
+            const element = hallRefs.current[hall.id];
+            if (!element) continue;
+            
+            const originalShadow = element.style.boxShadow;
+            element.style.boxShadow = 'none';
+
+            try {
+                const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
+                const dataUrl = canvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                const sanitizedTitle = activeExam.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                const sanitizedHallName = hall.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                link.download = `${sanitizedTitle}_${sanitizedHallName}_plan.png`;
+                link.href = dataUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+                console.error("Error generating PNG for hall:", hall.name, error);
+                setFormError(`Could not generate PNG for ${hall.name}.`);
+            } finally {
+                 element.style.boxShadow = originalShadow;
+            }
+        }
+        setIsDownloadingAll(false);
+    };
+
+    const handleDownloadFullExcelFromEditor = () => {
+        if (!activeExam || !activeExam.seatingPlan) {
+            setFormError("Seating plan not generated yet.");
+            return;
+        }
+        setFormError('');
+
+        const wb = XLSX.utils.book_new();
+
+        activeExam.halls.forEach(hall => {
+            const hallPlan = activeExam.seatingPlan![hall.id];
+            if (!hallPlan) return;
+
+            const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
+            const headers = [''];
+            for (let c = 0; c < maxCols; c++) { headers.push(`Col ${c + 1}`); }
+            const data = [headers];
+
+            for (let r = 0; r < hallPlan.length; r++) {
+                const rowData = [`Row ${r + 1}`];
+                for (let c = 0; c < maxCols; c++) {
+                    const seat = hallPlan[r]?.[c];
+                    rowData.push(seat?.student?.id || '');
+                }
+                data.push(rowData);
+            }
+
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        });
+
+        const sanitizedTitle = activeExam.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        XLSX.writeFile(wb, `${sanitizedTitle}_full_seating_plan.xlsx`);
+    };
+
     
     const handleDeleteExam = async (examId: string) => {
         if (!user) return;
@@ -765,13 +890,13 @@ const TeacherDashboard: React.FC = () => {
     };
 
     const handleSelectExam = (exam: Exam) => {
-        setActiveExam(JSON.parse(JSON.stringify(exam))); // Deep copy
+        setActiveExam({ ...JSON.parse(JSON.stringify(exam)), aiSeatingRules: exam.aiSeatingRules || '', seatingType: exam.seatingType || 'normal', editorMode: exam.editorMode || 'ai' }); // Deep copy and ensure fields exist
         setFormError('');
         setFormWarning('');
     };
 
-    const handleStartCreating = () => {
-        setActiveExam({ ...initialNewExamState, createdBy: user?.id || '', adminId: user?.adminId || '' });
+    const handleStartCreating = (mode: 'ai' | 'classic') => {
+        setActiveExam({ ...initialNewExamState, createdBy: user?.id || '', adminId: user?.adminId || '', editorMode: mode });
         setFormError('');
         setFormWarning('');
     };
@@ -782,15 +907,24 @@ const TeacherDashboard: React.FC = () => {
         setFormWarning('');
     }
 
-    const handleQuickGeneratePlan = async (examId: string) => {
-        setGeneratingPlanId(examId);
-        const exam = exams.find(e => e.id === examId);
-        if (!exam) {
-            setGeneratingPlanId(null);
-            return;
-        }
+    const handleQuickGeneratePlan = async (exam: Exam) => {
+        setGeneratingPlanId(exam.id);
         
-        const result = generateSeatingPlan(exam.halls, exam.studentSets);
+        let result;
+        if (exam.editorMode === 'classic') {
+             result = await generateClassicSeatingPlan({
+                halls: exam.halls, 
+                studentSets: exam.studentSets,
+            });
+        } else {
+             result = await generateSeatingPlan({
+                halls: exam.halls, 
+                studentSets: exam.studentSets, 
+                rules: exam.aiSeatingRules || 'Arrange students fairly.',
+                seatingType: exam.seatingType || 'normal'
+            });
+        }
+
         if (result.plan) {
             const examWithPlan = { ...exam, seatingPlan: result.plan };
             await updateExam(examWithPlan);
@@ -863,9 +997,11 @@ const TeacherDashboard: React.FC = () => {
                 const hall = examForDownload.halls.find(h => h.id === hallId);
                 if (!element || !hall) return;
 
-                element.style.boxShadow = 'none';
+                // FIX: Cast element to HTMLDivElement to access style property
+                (element as HTMLDivElement).style.boxShadow = 'none';
                 const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
-                element.style.boxShadow = '';
+                // FIX: Cast element to HTMLDivElement to access style property
+                (element as HTMLDivElement).style.boxShadow = '';
 
                 const dataUrl = canvas.toDataURL('image/png');
                 const link = document.createElement('a');
@@ -890,7 +1026,7 @@ const TeacherDashboard: React.FC = () => {
         return (
              <div className="min-h-screen">
                 <Header />
-                 <main className="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8 text-center">
+                 <main className="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8 text-center">
                     <Card>
                         <h2 className="text-2xl font-bold text-red-600 mb-4">Permission Denied</h2>
                         <p className="text-slate-600 dark:text-slate-400">Your account does not have the necessary permissions to manage exams. Please contact the administrator.</p>
@@ -904,7 +1040,7 @@ const TeacherDashboard: React.FC = () => {
         return (
             <div className="min-h-screen">
                 <Header />
-                <main className="max-w-7xl mx-auto py-6 px-4 text-center">Loading exam data...</main>
+                <main className="max-w-7xl mx-auto py-8 px-4 text-center">Loading exam data...</main>
             </div>
         );
     }
@@ -924,7 +1060,7 @@ const TeacherDashboard: React.FC = () => {
         return (
              <div className="min-h-screen">
                 <Header />
-                <main className="max-w-screen-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+                <main className="max-w-screen-2xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                     {isHallTemplateModalOpen && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-start pt-20 z-50" onClick={() => setIsHallTemplateModalOpen(false)}>
                             <div className="bg-white dark:bg-slate-800 p-6 rounded-lg shadow-xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
@@ -984,7 +1120,7 @@ const TeacherDashboard: React.FC = () => {
                         </div>
                     )}
                     <div className="relative mb-6">
-                        <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-200 text-center">{isNewExam ? 'Create New Exam' : 'Edit Exam'}</h2>
+                        <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-200 text-center">{isNewExam ? `Create New Exam` : 'Edit Exam'}</h2>
                         <div className="absolute top-1/2 right-0 transform -translate-y-1/2">
                             <Button onClick={handleCancel} variant="secondary">&larr; Back to Dashboard</Button>
                         </div>
@@ -1011,6 +1147,25 @@ const TeacherDashboard: React.FC = () => {
                                         onChange={e => handleFormChange('date', e.target.value)}
                                         containerClassName="sm:col-span-2"
                                     />
+                                </div>
+                            </Card>
+                            <Card>
+                                <h3 className="text-xl font-semibold mb-4 border-b dark:border-slate-700 pb-2">Editor Mode</h3>
+                                <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleEditorModeChange('ai')}
+                                        className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${activeExam.editorMode !== 'classic' ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-400 shadow' : 'text-slate-600 dark:text-slate-300'}`}
+                                    >
+                                        <SparklesIcon className="w-5 h-5" /> AI Mode
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleEditorModeChange('classic')}
+                                        className={`flex-1 text-center px-3 py-2 text-sm font-semibold rounded-md transition-all flex items-center justify-center gap-2 ${activeExam.editorMode === 'classic' ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-400 shadow' : 'text-slate-600 dark:text-slate-300'}`}
+                                    >
+                                        <GridIcon className="w-5 h-5" /> Classic Mode
+                                    </button>
                                 </div>
                             </Card>
                             <Card>
@@ -1071,11 +1226,11 @@ const TeacherDashboard: React.FC = () => {
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
                                                         <div>
                                                             <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">Student Placement</label>
-                                                            <div className="flex gap-2">
+                                                            <div className="flex gap-2 flex-wrap">
                                                                 <button 
                                                                     type="button" 
                                                                     onClick={() => handleConstraintTypeChange(index, 'no-limit')}
-                                                                    className={`px-3 py-1 text-xs font-semibold rounded-full transition ${hall.constraints?.type !== 'advanced' ? 'bg-violet-600 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200'}`}
+                                                                    className={`px-3 py-1 text-xs font-semibold rounded-full transition ${(!hall.constraints?.type || hall.constraints?.type === 'no-limit') ? 'bg-violet-600 text-white' : 'bg-slate-200 dark:bg-slate-600 text-slate-700 dark:text-slate-200'}`}
                                                                 >
                                                                     No Limit
                                                                 </button>
@@ -1239,21 +1394,90 @@ const TeacherDashboard: React.FC = () => {
                                     <b>Excel upload tip:</b> The name of the first sheet in your Excel file will be used as the set code. All cells containing data within that sheet will be read as student register numbers. To prevent issues with long register numbers, format the student ID columns as 'Text' in your spreadsheet software before saving.
                                 </p>
                             </Card>
+                            {activeExam.editorMode === 'ai' ? (
+                                <Card>
+                                    <h3 className="text-xl font-semibold mb-4 border-b dark:border-slate-700 pb-2">AI Seating Instructions</h3>
+                                    <div className="mt-6">
+                                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Seating Type</label>
+                                        <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                                            <button 
+                                                type="button" 
+                                                onClick={() => handleSeatingTypeChange('normal')}
+                                                className={`flex-1 text-center px-3 py-1 text-sm font-semibold rounded-md transition-all ${activeExam.seatingType !== 'fair' ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-400 shadow' : 'text-slate-600 dark:text-slate-300'}`}
+                                            >
+                                                Normal
+                                            </button>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => handleSeatingTypeChange('fair')}
+                                                className={`flex-1 text-center px-3 py-1 text-sm font-semibold rounded-md transition-all ${activeExam.seatingType === 'fair' ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-400 shadow' : 'text-slate-600 dark:text-slate-300'}`}
+                                            >
+                                                Fair
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                            {activeExam.seatingType === 'fair' 
+                                                ? 'Fair type automatically alternates students. Your custom instructions below will be added as extra rules.' 
+                                                : 'Normal type uses your custom AI instructions below for maximum flexibility.'}
+                                        </p>
+                                    </div>
+                                    <Textarea
+                                        label="Enter additional seating rules in natural language"
+                                        id="ai-rules"
+                                        value={activeExam.aiSeatingRules || ''}
+                                        onChange={e => handleFormChange('aiSeatingRules', e.target.value)}
+                                        placeholder="e.g., Prioritize putting students with accessibility needs in the front rows. Ensure no two students from 'Physics 101' sit in adjacent seats (horizontally or vertically)."
+                                        containerClassName="mt-4"
+                                    />
+                                </Card>
+                            ) : (
+                                <Card>
+                                    <h3 className="text-xl font-semibold mb-4 border-b dark:border-slate-700 pb-2">Classic Seating Algorithm</h3>
+                                    <div className="p-3 bg-sky-50 dark:bg-sky-500/10 rounded-md text-sm text-sky-700 dark:text-sky-300">
+                                        <p><strong>Classic Mode is active.</strong> This mode uses a predictable algorithm:</p>
+                                        <ul className="list-disc list-inside mt-2 space-y-1">
+                                            <li>Students are seated by cycling through each set (Set A, Set B, Set C, ...).</li>
+                                            <li>If only one set of students remains, an empty seat is placed between each of them.</li>
+                                        </ul>
+                                    </div>
+                                </Card>
+                            )}
+
                              {formWarning && <p className="text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-500/10 p-3 rounded-md text-sm text-center">{formWarning}</p>}
                              {formError && <p className="text-red-600 bg-red-100 dark:text-red-300 dark:bg-red-500/20 p-3 rounded-md text-sm text-center">{formError}</p>}
                              <div className="flex flex-col sm:flex-row gap-4">
                                 <Button onClick={handleSave} className="flex-1" disabled={isLoading || !isDirty}>
                                     {isLoading ? 'Saving...' : (isNewExam ? 'Create Exam' : 'Save Changes')}
                                 </Button>
-                                <Button onClick={handleGeneratePlan} variant="secondary" className="flex-1" disabled={isLoading}>
-                                     {isLoading ? 'Generating...' : (activeExam.seatingPlan ? 'Re-generate Plan' : 'Generate Seating Plan')}
+                                <Button onClick={handleGeneratePlan} variant="primary" className="flex-1" disabled={isLoading}>
+                                     {isLoading ? 'Generating...' : 'Generate Plan'}
                                 </Button>
                             </div>
                         </div>
 
                         {activeExam.seatingPlan && (
                             <div className="mt-8 space-y-8">
-                                <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-200 text-center">Seating Arrangement Preview</h3>
+                                <Card>
+                                    <div className="text-center">
+                                        <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">Seating Arrangement Preview & Downloads</h3>
+                                        <div className="flex justify-center flex-wrap gap-4">
+                                            <Button
+                                                onClick={handleDownloadAllPngsFromEditor}
+                                                variant="secondary"
+                                                className="flex items-center"
+                                                disabled={isDownloadingAll}
+                                            >
+                                                <DownloadIcon className="h-5 w-5 mr-2" /> {isDownloadingAll ? 'Downloading...' : 'Download All PNGs'}
+                                            </Button>
+                                            <Button
+                                                onClick={handleDownloadFullExcelFromEditor}
+                                                className="flex items-center"
+                                            >
+                                                <ExcelIcon className="h-5 w-5 mr-2" /> Download Full Excel
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </Card>
                                 {activeExam.halls.map(hall => {
                                     const parsedHall: Hall = {
                                         ...hall,
@@ -1293,10 +1517,80 @@ const TeacherDashboard: React.FC = () => {
         )
     }
 
+    const aiExams = exams.filter(e => e.editorMode !== 'classic'); // Treat legacy/undefined as AI
+    const classicExams = exams.filter(e => e.editorMode === 'classic');
+    
+    const renderExamList = (examList: Exam[]) => {
+        return (
+            <div className="space-y-3">
+                {examList.map(exam => {
+                    const isGenerating = generatingPlanId === exam.id;
+                    const isDownloading = downloadingExamId === exam.id;
+                    return (
+                        <div key={exam.id} className="group flex flex-wrap items-center justify-between p-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/50 dark:hover:bg-slate-700 rounded-lg transition">
+                            <div className="flex-grow cursor-pointer mb-2 sm:mb-0" onClick={() => handleSelectExam(exam)}>
+                                <p className="font-semibold">{exam.title}</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">Date: {exam.date}</p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-xs font-medium px-2 py-1 rounded-full ${exam.seatingPlan ? 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
+                                    {exam.seatingPlan ? 'Plan Generated' : 'Pending Plan'}
+                                </span>
+
+                                {exam.seatingPlan ? (
+                                    <>
+                                        <Button
+                                            variant="secondary"
+                                            className="!py-1 !px-2 text-xs"
+                                            onClick={(e) => { e.stopPropagation(); handleDownloadAll(exam); }}
+                                            disabled={isDownloading}
+                                        >
+                                            {isDownloading ? '...' : 'Download PNGs'}
+                                        </Button>
+                                        <Button
+                                            variant="secondary"
+                                            className="!py-1 !px-2 text-xs"
+                                            onClick={(e) => { e.stopPropagation(); handleDownloadAllExcel(exam); }}
+                                        >
+                                            Download Excel
+                                        </Button>
+                                    </>
+                                ) : (
+                                    <Button
+                                        variant="primary"
+                                        className="!py-1 !px-2 text-xs"
+                                        onClick={(e) => { e.stopPropagation(); handleQuickGeneratePlan(exam); }}
+                                        disabled={isGenerating}
+                                    >
+                                        {isGenerating ? 'Generating...' : 'Generate Plan'}
+                                    </Button>
+                                )}
+
+                                <Button 
+                                    variant="danger" 
+                                    className="!py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteExam(exam.id);
+                                    }}
+                                >
+                                    Delete
+                                </Button>
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400 cursor-pointer" fill="none" viewBox="0 0 24 24" stroke="currentColor" onClick={() => handleSelectExam(exam)}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                                </svg>
+                            </div>
+                        </div>
+                    )
+                })}
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen">
             <Header />
-            <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 {hallEditorState.mode === 'create-template' && (
                     <HallLayoutEditor
                         isOpen={true}
@@ -1353,132 +1647,121 @@ const TeacherDashboard: React.FC = () => {
                     </div>
                 )}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-                    <div className="lg:col-span-2 space-y-6">
-                         <Card>
-                            <div className="flex justify-between items-center mb-4">
-                                <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">My Exams</h2>
-                                <Button onClick={handleStartCreating}>+ Create New Exam</Button>
+                    <div className="lg:col-span-2 space-y-8">
+                        <Card>
+                            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200">Start a New Exam</h2>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 mb-6">Choose an editor mode to begin creating your exam schedule.</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <button
+                                    onClick={() => handleStartCreating('ai')}
+                                    className="group text-left p-4 flex items-center gap-4 bg-slate-50 dark:bg-slate-700/50 hover:bg-violet-50 dark:hover:bg-violet-500/10 rounded-lg border-2 border-transparent hover:border-violet-400 transition-all"
+                                >
+                                    <SparklesIcon className="text-violet-500 dark:text-violet-400 w-8 h-8 flex-shrink-0" />
+                                    <div>
+                                        <h3 className="font-semibold text-slate-800 dark:text-slate-200">AI-Powered Mode</h3>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Flexible seating with natural language rules.</p>
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={() => handleStartCreating('classic')}
+                                    className="group text-left p-4 flex items-center gap-4 bg-slate-50 dark:bg-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg border-2 border-transparent hover:border-slate-400 transition-all"
+                                >
+                                    <GridIcon className="text-slate-500 dark:text-slate-400 w-8 h-8 flex-shrink-0" />
+                                    <div>
+                                        <h3 className="font-semibold text-slate-800 dark:text-slate-200">Classic Mode</h3>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Predictable, algorithm-based seating.</p>
+                                    </div>
+                                </button>
                             </div>
-                            {exams.length > 0 ? (
-                                <div className="space-y-3">
-                                    {exams.map(exam => {
-                                        const isGenerating = generatingPlanId === exam.id;
-                                        const isDownloading = downloadingExamId === exam.id;
-                                        return (
-                                            <div key={exam.id} className="group flex flex-wrap items-center justify-between p-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/50 dark:hover:bg-slate-700 rounded-lg transition">
-                                                <div className="flex-grow cursor-pointer mb-2 sm:mb-0" onClick={() => handleSelectExam(exam)}>
-                                                    <p className="font-semibold">{exam.title}</p>
-                                                    <p className="text-sm text-slate-500 dark:text-slate-400">Date: {exam.date}</p>
-                                                </div>
-                                                <div className="flex items-center gap-2 flex-wrap">
-                                                    <span className={`text-xs font-medium px-2 py-1 rounded-full ${exam.seatingPlan ? 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
-                                                        {exam.seatingPlan ? 'Plan Generated' : 'Pending Plan'}
-                                                    </span>
+                        </Card>
 
-                                                    {exam.seatingPlan ? (
-                                                        <>
-                                                            <Button
-                                                                variant="secondary"
-                                                                className="!py-1 !px-2 text-xs"
-                                                                onClick={(e) => { e.stopPropagation(); handleDownloadAll(exam); }}
-                                                                disabled={isDownloading}
-                                                            >
-                                                                {isDownloading ? '...' : 'Download PNGs'}
-                                                            </Button>
-                                                            <Button
-                                                                variant="secondary"
-                                                                className="!py-1 !px-2 text-xs"
-                                                                onClick={(e) => { e.stopPropagation(); handleDownloadAllExcel(exam); }}
-                                                            >
-                                                                Download Excel
-                                                            </Button>
-                                                        </>
-                                                    ) : (
-                                                        <Button
-                                                            variant="primary"
-                                                            className="!py-1 !px-2 text-xs"
-                                                            onClick={(e) => { e.stopPropagation(); handleQuickGeneratePlan(exam.id); }}
-                                                            disabled={isGenerating}
-                                                        >
-                                                            {isGenerating ? 'Generating...' : 'Generate Plan'}
-                                                        </Button>
-                                                    )}
-
-                                                    <Button 
-                                                        variant="danger" 
-                                                        className="!py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteExam(exam.id);
-                                                        }}
-                                                    >
-                                                        Delete
-                                                    </Button>
-                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-400 cursor-pointer" fill="none" viewBox="0 0 24 24" stroke="currentColor" onClick={() => handleSelectExam(exam)}>
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                                    </svg>
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            ) : (
-                                <p className="text-center text-slate-500 dark:text-slate-400 py-4">You haven't created any exams yet.</p>
-                            )}
+                        <Card>
+                            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">My Exam Schedules</h2>
+                            <div className="border-b border-slate-200 dark:border-slate-700">
+                                <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+                                    <button
+                                        onClick={() => setActiveTab('ai')}
+                                        className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'ai' ? 'border-violet-500 dark:border-violet-400 text-violet-600 dark:text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                                    >
+                                        AI Exams ({aiExams.length})
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('classic')}
+                                        className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'classic' ? 'border-violet-500 dark:border-violet-400 text-violet-600 dark:text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                                    >
+                                        Classic Exams ({classicExams.length})
+                                    </button>
+                                </nav>
+                            </div>
+                             <div className="mt-6">
+                                {activeTab === 'ai' ? (
+                                    aiExams.length > 0 ? renderExamList(aiExams) : (
+                                        <p className="text-center text-slate-500 dark:text-slate-400 py-4">You haven't created any AI-powered exams yet.</p>
+                                    )
+                                ) : (
+                                    classicExams.length > 0 ? renderExamList(classicExams) : (
+                                        <p className="text-center text-slate-500 dark:text-slate-400 py-4">You haven't created any classic exams yet.</p>
+                                    )
+                                )}
+                            </div>
                         </Card>
                     </div>
+
                     <div className="lg:col-span-1 space-y-6">
                         <Card>
-                             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">My Hall Templates</h2>
-                             <div className="p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg mb-4 space-y-3">
-                                 <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">Create New Hall Template</h3>
-                                <div className="flex gap-2 flex-wrap">
-                                     <Button onClick={() => {
-                                        setIsGridTemplateModalOpen(true);
-                                        setGridTemplateFormError('');
-                                        setNewGridTemplate({ name: '', rows: '8', cols: '10' });
-                                    }}>+ Create with Grid</Button>
-                                    <Button onClick={() => setHallEditorState({ mode: 'create-template', hallIndex: null })}>+ Create with Advanced Editor</Button>
+                             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-6">My Templates</h2>
+                             <div className="mb-8">
+                                <h3 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-4">Hall Templates</h3>
+                                <div className="p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg mb-4 space-y-3">
+                                    <h4 className="text-lg font-semibold text-slate-700 dark:text-slate-300">Create New Hall Template</h4>
+                                    <div className="flex gap-2 flex-wrap">
+                                        <Button onClick={() => {
+                                            setIsGridTemplateModalOpen(true);
+                                            setGridTemplateFormError('');
+                                            setNewGridTemplate({ name: '', rows: '8', cols: '10' });
+                                        }}>+ Create with Grid</Button>
+                                        <Button onClick={() => setHallEditorState({ mode: 'create-template', hallIndex: null })}>+ Create with Editor</Button>
+                                    </div>
+                                </div>
+                                <div className="space-y-2 max-h-60 overflow-y-auto">
+                                    {hallTemplates.length > 0 ? hallTemplates.map(template => (
+                                        <div key={template.id} className="group flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-700 rounded-md">
+                                            <div>
+                                                <p className="font-semibold">{template.name}</p>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400">{template.layout.length} seats</p>
+                                            </div>
+                                            <button onClick={() => handleDeleteHallTemplate(template.id)} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <TrashIcon />
+                                            </button>
+                                        </div>
+                                    )) : <p className="text-slate-500 dark:text-slate-400 text-center py-4 text-sm">No templates created yet.</p>}
                                 </div>
                              </div>
 
-                            <div className="space-y-2 max-h-96 overflow-y-auto">
-                                {hallTemplates.length > 0 ? hallTemplates.map(template => (
-                                    <div key={template.id} className="group flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-700 rounded-md">
-                                        <div>
-                                            <p className="font-semibold">{template.name}</p>
-                                            <p className="text-sm text-slate-500 dark:text-slate-400">{template.layout.length} seats</p>
-                                        </div>
-                                        <button onClick={() => handleDeleteHallTemplate(template.id)} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <TrashIcon />
-                                        </button>
-                                    </div>
-                                )) : <p className="text-slate-500 dark:text-slate-400 text-center py-4 text-sm">No templates created yet.</p>}
-                            </div>
-                        </Card>
-                        <Card>
-                             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">My Student Set Templates</h2>
-                             <form onSubmit={handleCreateStudentSetTemplate} className="p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg mb-4 space-y-3">
-                                 <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300">Create New Template</h3>
-                                 <Input label="Subject / Set Code" id="template-subject" placeholder="e.g. Physics 101" value={newStudentSetTemplate.subject} onChange={e => setNewStudentSetTemplate({...newStudentSetTemplate, subject: e.target.value})} />
-                                 <Input label="No. of Students" id="template-count" type="number" min="1" placeholder="e.g. 50" value={newStudentSetTemplate.studentCount} onChange={e => setNewStudentSetTemplate({...newStudentSetTemplate, studentCount: e.target.value})} />
-                                 {studentSetTemplateFormError && <p className="text-xs text-red-600 dark:text-red-400">{studentSetTemplateFormError}</p>}
-                                 <Button type="submit" className="w-full">Save Template</Button>
-                             </form>
+                             <div>
+                                 <h3 className="text-2xl font-bold text-slate-800 dark:text-slate-200 mb-4">Student Set Templates</h3>
+                                 <form onSubmit={handleCreateStudentSetTemplate} className="p-4 bg-slate-100 dark:bg-slate-700/50 rounded-lg mb-4 space-y-3">
+                                     <h4 className="text-lg font-semibold text-slate-700 dark:text-slate-300">Create New Template</h4>
+                                     <Input label="Subject / Set Code" id="template-subject" placeholder="e.g. Physics 101" value={newStudentSetTemplate.subject} onChange={e => setNewStudentSetTemplate({...newStudentSetTemplate, subject: e.target.value})} />
+                                     <Input label="No. of Students" id="template-count" type="number" min="1" placeholder="e.g. 50" value={newStudentSetTemplate.studentCount} onChange={e => setNewStudentSetTemplate({...newStudentSetTemplate, studentCount: e.target.value})} />
+                                     {studentSetTemplateFormError && <p className="text-xs text-red-600 dark:text-red-400">{studentSetTemplateFormError}</p>}
+                                     <Button type="submit" className="w-full">Save Template</Button>
+                                 </form>
 
-                            <div className="space-y-2 max-h-96 overflow-y-auto">
-                                {studentSetTemplates.length > 0 ? studentSetTemplates.map(template => (
-                                    <div key={template.id} className="group flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-700 rounded-md">
-                                        <div>
-                                            <p className="font-semibold">{template.subject}</p>
-                                            <p className="text-sm text-slate-500 dark:text-slate-400">{template.studentCount} students</p>
+                                <div className="space-y-2 max-h-60 overflow-y-auto">
+                                    {studentSetTemplates.length > 0 ? studentSetTemplates.map(template => (
+                                        <div key={template.id} className="group flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-700 rounded-md">
+                                            <div>
+                                                <p className="font-semibold">{template.subject}</p>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400">{template.studentCount} students</p>
+                                            </div>
+                                            <button onClick={() => handleDeleteStudentSetTemplate(template.id)} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <TrashIcon />
+                                            </button>
                                         </div>
-                                        <button onClick={() => handleDeleteStudentSetTemplate(template.id)} className="text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <TrashIcon />
-                                        </button>
-                                    </div>
-                                )) : <p className="text-slate-500 dark:text-slate-400 text-center py-4 text-sm">No templates created yet.</p>}
-                            </div>
+                                    )) : <p className="text-slate-500 dark:text-slate-400 text-center py-4 text-sm">No templates created yet.</p>}
+                                </div>
+                             </div>
                         </Card>
                     </div>
                 </div>

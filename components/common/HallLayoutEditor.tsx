@@ -194,12 +194,17 @@ const HallLayoutEditor: React.FC<HallLayoutEditorProps> = ({ isOpen, onClose, on
                                     const seat = seatsMap.get(`${row}-${col}`);
 
                                     if (seat) {
-                                        const seatInfo = SEAT_TYPES.find(st => st.type === seat.type)!;
+                                        // FIX: Explicitly cast `seat` to `SeatDefinition`.
+                                        // For some reason, TypeScript is inferring `seat` as `unknown` here.
+                                        // This explicit cast resolves the type errors on `seat.type`, `seat.id`,
+                                        // and when passing `seat` to `handleDragStartGrid`.
+                                        const seatDefinition = seat as SeatDefinition;
+                                        const seatInfo = SEAT_TYPES.find(st => st.type === seatDefinition.type)!;
                                         return (
                                             <div
-                                                key={seat.id}
+                                                key={seatDefinition.id}
                                                 draggable
-                                                onDragStart={(e) => handleDragStartGrid(e, seat)}
+                                                onDragStart={(e) => handleDragStartGrid(e, seatDefinition)}
                                                 className={`w-10 h-10 rounded cursor-move flex items-center justify-center font-bold text-slate-800 dark:text-slate-900 border border-slate-400 dark:border-slate-500 ${seatInfo.style}`}
                                                 title={`${seatInfo.label} Seat (R${row + 1}, C${col + 1})`}
                                             >

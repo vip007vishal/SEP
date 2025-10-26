@@ -68,6 +68,9 @@ export interface Exam {
     halls: Hall[];
     studentSets: StudentSet[];
     seatingPlan?: SeatingPlan;
+    aiSeatingRules?: string;
+    seatingType?: 'normal' | 'fair';
+    editorMode?: 'ai' | 'classic';
     createdBy: string; // teacherId
     adminId: string;
 }

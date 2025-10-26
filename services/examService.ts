@@ -1,72 +1,51 @@
+import { GoogleGenAI, Type } from '@google/genai';
 import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role, HallTemplate, StudentSetTemplate, SeatDefinition, StudentInfo } from '../types';
+import { initialDbData } from './mockData';
 
-// To ensure a true singleton in a hot-reload dev environment, we attach our DB to the window object.
-// This prevents HMR from resetting our data on every change.
-if (!(window as any).APP_DB) {
-    console.log("Initializing In-Memory Database...");
-    (window as any).APP_DB = {
-        users: [
-            { id: 'admin01', name: 'Admin User', email: 'admin@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'Global Tech University' },
-            { id: 'admin02', name: 'Second Admin', email: 'admin2@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'Innovate Institute' },
-            { id: 'teacher01', name: 'Dr. Evelyn Reed', email: 'teacher1@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123', adminId: 'admin01' },
-            { id: 'teacher02', name: 'Mr. Samuel Chen', email: 'teacher2@exam.com', role: Role.TEACHER, permissionGranted: false, password: 'password123', adminId: 'admin02' },
-            { id: 'teacher03', name: 'Ms. Anya Sharma', email: 'teacher3@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123', adminId: 'admin01' },
-            { id: 'teacher04', name: 'Ms. Nitya', email: 'teacher4@exam.com', role: Role.TEACHER, permissionGranted: false, password: 'password123', adminId: 'admin01' },
-        ],
-        exams: [
-            {
-                id: 'exam01',
-                title: 'Mid-Term Examinations',
-                date: '2024-09-15',
-                halls: [
-                    { id: 'hallA', name: 'Hall A', layout: Array.from({length: 64}, (_, i) => ({id: `s${i}`, row: Math.floor(i/8), col: i % 8, type: 'standard'})), constraints: { type: 'no-limit' } },
-                    { id: 'hallB', name: 'Hall B', layout: Array.from({length: 42}, (_, i) => ({id: `s${i}`, row: Math.floor(i/7), col: i % 7, type: 'standard'})), constraints: { type: 'no-limit' } },
-                ],
-                studentSets: [
-                    { id: 'set101', subject: '101', studentCount: 50 },
-                    { id: 'set102', subject: '102', studentCount: 45 },
-                ],
-                seatingPlan: undefined,
-                createdBy: 'teacher01',
-                adminId: 'admin01'
-            }
-        ],
-        hallTemplates: [
-            { id: 'template01', name: 'Main Auditorium', layout: Array.from({length: 100}, (_, i) => ({id: `s${i}`, row: Math.floor(i/10), col: i % 10, type: 'standard'})), createdBy: 'teacher01', adminId: 'admin01' },
-            { id: 'template02', name: 'Computer Lab 1', layout: Array.from({length: 40}, (_, i) => ({id: `s${i}`, row: Math.floor(i/8), col: i % 8, type: 'standard'})), createdBy: 'teacher01', adminId: 'admin01' },
-        ],
-        studentSetTemplates: [
-            { id: 'settemplate01', subject: 'Physics 101', studentCount: 50, createdBy: 'teacher01', adminId: 'admin01' },
-            { id: 'settemplate02', subject: 'Chemistry Lab', studentCount: 24, createdBy: 'teacher01', adminId: 'admin01' },
-            { id: 'settemplate03', subject: 'Calculus III', studentCount: 45, createdBy: 'teacher03', adminId: 'admin01' },
-        ]
-    };
-}
+// --- PRODUCTION-READY ARCHITECTURE ---
+// In a real KWS/PostgreSQL application, this entire file would be the API client layer.
+// Instead of manipulating a local 'db' object, each function would make a `fetch` call
+// to a corresponding endpoint on your backend server.
 
-// All functions will now reference this singleton DB.
-const db: { users: User[], exams: Exam[], hallTemplates: HallTemplate[], studentSetTemplates: StudentSetTemplate[] } = (window as any).APP_DB;
+// We initialize our simulated database from a clean mock data source.
+// This is a deep copy, so the state is fresh on every full page load,
+// just like fetching from a real API.
+let db: typeof initialDbData = JSON.parse(JSON.stringify(initialDbData));
 
+const API_LATENCY = 200; // ms to simulate network delay
 
-// --- User Management Functions (Synchronous, returning Promises) ---
+// --- User Management Functions (Simulating Backend API calls) ---
 
-export const getInstitutions = (): Promise<{ id: string, name: string }[]> => {
-    return Promise.resolve(
-        db.users
-            .filter(u => u.role === Role.ADMIN && u.institutionName)
-            .map(u => ({ id: u.id, name: u.institutionName! }))
-            .sort((a, b) => a.name.localeCompare(b.name))
-    );
+export const getInstitutions = async (): Promise<{ id: string, name: string }[]> => {
+    console.log('SIMULATING API: GET /api/institutions');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
+    const institutions = db.users
+        .filter(u => u.role === Role.ADMIN && u.institutionName)
+        .map(u => ({ id: u.id, name: u.institutionName! }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    
+    return Promise.resolve(institutions);
 };
 
-export const findUserByEmail = (email: string): Promise<User | undefined> => {
-     return Promise.resolve(db.users.find(u => u.email.toLowerCase() === email.toLowerCase()));
+export const findUserByEmail = async (email: string): Promise<User | undefined> => {
+    console.log(`SIMULATING API: GET /api/users?email=${email}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    
+    return Promise.resolve(db.users.find(u => u.email.toLowerCase() === email.toLowerCase()));
 };
 
-export const findUserById = (id: string): Promise<User | undefined> => {
+export const findUserById = async (id: string): Promise<User | undefined> => {
+    console.log(`SIMULATING API: GET /api/users/${id}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     return Promise.resolve(db.users.find(u => u.id === id));
 };
 
-export const createAdminUser = (name: string, email: string, password: string, institutionName: string): Promise<User | null> => {
+export const createAdminUser = async (name: string, email: string, password: string, institutionName: string): Promise<User | null> => {
+    console.log('SIMULATING API: POST /api/admins');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     if (db.users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
         return Promise.resolve(null); // User already exists
     }
@@ -80,14 +59,14 @@ export const createAdminUser = (name: string, email: string, password: string, i
         institutionName,
     };
 
-    db.users = [...db.users, newAdmin]; // Immutable update
-    console.log('New admin created:', newAdmin);
-    console.log('Current users:', db.users);
+    db.users = [...db.users, newAdmin];
     return Promise.resolve(newAdmin);
 };
 
+export const createTeacherUser = async (name: string, email: string, password: string, adminIdentifier: string): Promise<User | null> => {
+    console.log('SIMULATING API: POST /api/teachers');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
 
-export const createTeacherUser = (name: string, email: string, password: string, adminIdentifier: string): Promise<User | null> => {
     if (db.users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
         return Promise.resolve(null); // User with this email already exists
     }
@@ -109,20 +88,34 @@ export const createTeacherUser = (name: string, email: string, password: string,
         adminId: admin.id,
     };
 
-    db.users = [...db.users, newTeacher]; // Immutable update
+    db.users = [...db.users, newTeacher];
     return Promise.resolve(newTeacher);
 };
 
 
-export const getTeachersForAdmin = (adminId: string): Promise<User[]> => {
+export const getTeachersForAdmin = async (adminId: string): Promise<User[]> => {
+    console.log(`SIMULATING API: GET /api/admins/${adminId}/teachers`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    
     return Promise.resolve(db.users.filter(u => u.role === 'TEACHER' && u.adminId === adminId));
 };
 
-export const grantTeacherPermission = (teacherId: string, adminId: string): Promise<User | undefined> => {
+export const getUnassignedTeachers = async (): Promise<User[]> => {
+    console.log('SIMULATING API: GET /api/teachers?assigned=false');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
+    return Promise.resolve(db.users.filter(u => u.role === 'TEACHER' && !u.permissionGranted && !u.adminId));
+};
+
+
+export const grantTeacherPermission = async (teacherId: string, adminId: string): Promise<User | undefined> => {
+    console.log(`SIMULATING API: PATCH /api/teachers/${teacherId}/permission`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     let updatedTeacher: User | undefined = undefined;
     db.users = db.users.map(user => {
-        if (user.id === teacherId && user.role === 'TEACHER' && user.adminId === adminId) {
-            updatedTeacher = { ...user, permissionGranted: true };
+        if (user.id === teacherId && user.role === 'TEACHER') {
+            updatedTeacher = { ...user, permissionGranted: true, adminId: adminId };
             return updatedTeacher;
         }
         return user;
@@ -130,7 +123,10 @@ export const grantTeacherPermission = (teacherId: string, adminId: string): Prom
     return Promise.resolve(updatedTeacher);
 };
 
-export const revokeTeacherPermission = (teacherId: string): Promise<User | undefined> => {
+export const revokeTeacherPermission = async (teacherId: string): Promise<User | undefined> => {
+    console.log(`SIMULATING API: PATCH /api/teachers/${teacherId}/permission`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     let updatedTeacher: User | undefined = undefined;
     db.users = db.users.map(user => {
         if (user.id === teacherId && user.role === 'TEACHER') {
@@ -142,18 +138,18 @@ export const revokeTeacherPermission = (teacherId: string): Promise<User | undef
     return Promise.resolve(updatedTeacher);
 };
 
-export const deleteTeacher = (teacherId: string, adminId: string): Promise<boolean> => {
+export const deleteTeacher = async (teacherId: string, adminId: string): Promise<boolean> => {
+    console.log(`SIMULATING API: DELETE /api/teachers/${teacherId}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     const initialUserCount = db.users.length;
     const teacherToDelete = db.users.find(u => u.id === teacherId);
 
-    // Admin can only delete teachers assigned to their institution.
-    if (!teacherToDelete || teacherToDelete.adminId !== adminId) {
+    if (!teacherToDelete || (teacherToDelete.adminId && teacherToDelete.adminId !== adminId)) {
         return Promise.resolve(false);
     }
     
     db.users = db.users.filter(u => u.id !== teacherId);
-
-    // Also remove all assets created by this teacher
     db.exams = db.exams.filter(exam => exam.createdBy !== teacherId);
     db.hallTemplates = db.hallTemplates.filter(t => t.createdBy !== teacherId);
     db.studentSetTemplates = db.studentSetTemplates.filter(t => t.createdBy !== teacherId);
@@ -162,36 +158,35 @@ export const deleteTeacher = (teacherId: string, adminId: string): Promise<boole
 };
 
 
-// --- Exam Management Functions (Synchronous, returning Promises) ---
+// --- Exam Management Functions ---
 
-export const getExamsForAdmin = (adminId: string): Promise<Exam[]> => {
+export const getExamsForAdmin = async (adminId: string): Promise<Exam[]> => {
+    console.log(`SIMULATING API: GET /api/admins/${adminId}/exams`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     return Promise.resolve([...db.exams].filter(e => e.adminId === adminId).sort((a, b) => b.id.localeCompare(a.id)));
 };
 
-// Ensures all exams have a seating plan generated if they don't already.
-const ensureAllPlansAreGenerated = () => {
+export const getExamsForStudent = async (registerNumber: string, adminId: string): Promise<Exam[]> => {
+    console.log(`SIMULATING API: GET /api/students/${registerNumber}/exams?adminId=${adminId}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
+    // On a real backend, this logic would be a complex SQL query.
+    // For this demonstration, we generate plans on-the-fly if they don't exist.
     for (const exam of db.exams) {
-        if (!exam.seatingPlan) {
-            const result = generateSeatingPlan(exam.halls, exam.studentSets);
-            if (result.plan) {
-                exam.seatingPlan = result.plan;
+        if (!exam.seatingPlan && exam.adminId === adminId) {
+            let result;
+            if(exam.editorMode === 'classic') {
+                result = await generateClassicSeatingPlan({ halls: exam.halls, studentSets: exam.studentSets });
+            } else {
+                result = await generateSeatingPlan({ halls: exam.halls, studentSets: exam.studentSets, rules: exam.aiSeatingRules, seatingType: exam.seatingType });
             }
+            if (result.plan) exam.seatingPlan = result.plan;
         }
     }
-};
-
-export const getExamsForStudent = (registerNumber: string, adminId: string): Promise<Exam[]> => {
-    ensureAllPlansAreGenerated();
 
     const studentExams = db.exams.filter(exam => {
-        if (exam.adminId !== adminId) {
-            return false;
-        }
-        
-        if (!exam.seatingPlan) {
-            return false;
-        }
-
+        if (exam.adminId !== adminId || !exam.seatingPlan) return false;
         return Object.values(exam.seatingPlan).some(hallPlan => 
             hallPlan.some(row => 
                 row.some(seat => seat?.student?.id === registerNumber)
@@ -202,7 +197,10 @@ export const getExamsForStudent = (registerNumber: string, adminId: string): Pro
     return Promise.resolve(studentExams.sort((a, b) => b.id.localeCompare(a.id)));
 };
 
-export const getExamsForTeacher = (teacherId: string): Promise<Exam[]> => {
+export const getExamsForTeacher = async (teacherId: string): Promise<Exam[]> => {
+    console.log(`SIMULATING API: GET /api/teachers/${teacherId}/exams`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     return Promise.resolve(db.exams.filter(e => e.createdBy === teacherId).sort((a,b) => b.id.localeCompare(a.id)));
 };
 
@@ -211,7 +209,13 @@ export const createExam = async (examData: {
     date: string;
     halls: Omit<Hall, 'id'>[];
     studentSets: Omit<StudentSet, 'id'>[];
+    aiSeatingRules?: string;
+    seatingType?: 'normal' | 'fair';
+    editorMode?: 'ai' | 'classic';
 }, teacherId: string): Promise<Exam> => {
+    console.log('SIMULATING API: POST /api/exams');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     const teacher = await findUserById(teacherId);
     if (!teacher || !teacher.adminId) {
         throw new Error("Cannot create exam: Teacher is not assigned to an admin.");
@@ -220,6 +224,9 @@ export const createExam = async (examData: {
     const newExam: Exam = {
         title: examData.title,
         date: examData.date,
+        aiSeatingRules: examData.aiSeatingRules,
+        seatingType: examData.seatingType || 'normal',
+        editorMode: examData.editorMode || 'ai',
         id: `exam${Date.now()}`,
         createdBy: teacherId,
         adminId: teacher.adminId,
@@ -231,12 +238,18 @@ export const createExam = async (examData: {
     return Promise.resolve(newExam);
 };
 
-export const updateExam = (updatedExam: Exam): Promise<Exam> => {
+export const updateExam = async (updatedExam: Exam): Promise<Exam> => {
+    console.log(`SIMULATING API: PUT /api/exams/${updatedExam.id}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     db.exams = db.exams.map(exam => exam.id === updatedExam.id ? updatedExam : exam);
     return Promise.resolve(updatedExam);
 };
 
-export const deleteExam = (examId: string, ownerId: string, role: Role): Promise<boolean> => {
+export const deleteExam = async (examId: string, ownerId: string, role: Role): Promise<boolean> => {
+    console.log(`SIMULATING API: DELETE /api/exams/${examId}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
     const initialLength = db.exams.length;
     const exam = db.exams.find(e => e.id === examId);
     if (!exam) return Promise.resolve(false);
@@ -252,80 +265,7 @@ export const deleteExam = (examId: string, ownerId: string, role: Role): Promise
     return Promise.resolve(false);
 };
 
-// --- Seating Plan Generation ---
-
-// Sub-algorithm to place a given list of students into a given list of seats
-const assignStudentsToSeats = (seats: Seat[], students: StudentInfo[], studentSets: StudentSet[]): { assignedSeatsMap: Map<string, Seat>; message?: string } => {
-    const assignedSeatsMap = new Map<string, Seat>();
-    let message: string | undefined = undefined;
-    let seatIndex = 0;
-
-    const studentsBySet = studentSets.reduce((acc, set) => {
-        acc[set.id] = students.filter(s => s.setId === set.id);
-        return acc;
-    }, {} as Record<string, StudentInfo[]>);
-    
-    let activeSetIds = studentSets.map(s => s.id).filter(id => studentsBySet[id] && studentsBySet[id].length > 0);
-    let setRotationIndex = 0;
-
-    // Distribute students from different sets in a zig-zag pattern
-    while (activeSetIds.length > 1 && seatIndex < seats.length) {
-        setRotationIndex = setRotationIndex % activeSetIds.length;
-        const currentSetId = activeSetIds[setRotationIndex];
-        const studentToAssign = studentsBySet[currentSetId].shift();
-        
-        if (studentToAssign) {
-            const seat = seats[seatIndex];
-            seat.student = studentToAssign;
-            assignedSeatsMap.set(`${seat.hallId}-${seat.row}-${seat.col}`, seat);
-            seatIndex++;
-        }
-        
-        if (studentsBySet[currentSetId].length === 0) {
-            activeSetIds.splice(setRotationIndex, 1);
-        } else {
-            setRotationIndex++;
-        }
-    }
-
-    // Handle the last remaining set (or if there was only one set to begin with)
-    if (activeSetIds.length === 1 && seatIndex < seats.length) {
-        const remainingSetId = activeSetIds[0];
-        const studentQueue = studentsBySet[remainingSetId];
-        
-        const remainingSeatsCount = seats.length - seatIndex;
-        // If there's enough space, leave one empty seat between students.
-        // The space required is (number of students * 2) - 1. E.g., for 3 students: S_S_S needs 5 seats.
-        if (remainingSeatsCount >= (studentQueue.length * 2 - 1)) {
-            while (studentQueue.length > 0 && seatIndex < seats.length) {
-                const seat = seats[seatIndex];
-                seat.student = studentQueue.shift();
-                assignedSeatsMap.set(`${seat.hallId}-${seat.row}-${seat.col}`, seat);
-                seatIndex += 2; // Skip a seat
-            }
-        } else { // Not enough space for spacing, fill normally
-            if (studentSets.length === 1) {
-                message = "Not enough hall space for a spaced arrangement (one empty seat per student). Students have been seated normally.";
-            } else {
-                message = "Not enough hall space for a spaced arrangement for the last set of students. They have been seated normally.";
-            }
-            while (studentQueue.length > 0 && seatIndex < seats.length) {
-                const seat = seats[seatIndex];
-                seat.student = studentQueue.shift();
-                assignedSeatsMap.set(`${seat.hallId}-${seat.row}-${seat.col}`, seat);
-                seatIndex += 1;
-            }
-        }
-    }
-    
-    return { assignedSeatsMap, message };
-};
-
-export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): { plan: SeatingPlan | null; message?: string } => {
-    const finalPlan: SeatingPlan = {};
-    const allMessages: string[] = [];
-
-    // 1. Generate student list
+const generateStudentList = (studentSets: StudentSet[]): StudentInfo[] => {
     const allStudents: StudentInfo[] = [];
     studentSets.forEach(set => {
         if (set.students && set.students.length > 0) {
@@ -338,191 +278,281 @@ export const generateSeatingPlan = (halls: Hall[], studentSets: StudentSet[]): {
             }
         }
     });
+    return allStudents;
+}
 
-    let unseatedStudents = [...allStudents];
-    const advancedHalls = halls.filter(h => h.constraints?.type === 'advanced');
-    const noLimitHalls = halls.filter(h => h.constraints?.type !== 'advanced');
+// --- Seating Plan Generation ---
 
-    // 2. Process "Advanced" halls, allowing overflow
-    for (const hall of advancedHalls) {
-        const allowedSetIds = new Set(hall.constraints?.allowedSetIds || []);
-        const eligibleStudents = unseatedStudents.filter(s => allowedSetIds.has(s.setId));
-        
-        const sortFunction = hall.constraints?.arrangement === 'vertical'
-            ? (a: SeatDefinition, b: SeatDefinition) => a.col - b.col || a.row - b.row
-            : (a: SeatDefinition, b: SeatDefinition) => a.row - b.row || a.col - b.col;
+export const generateClassicSeatingPlan = async (
+    examData: { halls: Hall[], studentSets: StudentSet[] }
+): Promise<{ plan: SeatingPlan | null; message?: string }> => {
+    console.log('--- RUNNING CLASSIC SEATING ALGORITHM ---');
+    const { halls, studentSets } = examData;
+    const allStudents = generateStudentList(studentSets);
 
-        const seatsForHall: Seat[] = hall.layout
-            .filter(seatDef => seatDef.type === 'standard' || seatDef.type === 'accessible')
-            .sort(sortFunction)
-            .map(seatDef => ({ ...seatDef, hallId: hall.id }));
+    const availableSeats = halls.flatMap(hall => {
+        const hallSeats = hall.layout
+            .filter(seat => seat.type !== 'faculty')
+            .map(seat => ({ ...seat, hallId: hall.id }));
 
-        let studentsToSeat: StudentInfo[] = [];
-
-        if (allowedSetIds.size === 1 && seatsForHall.length > 0) {
-            // Special case for single-set advanced halls to enforce spaced seating.
-            const maxSpacedCapacity = Math.ceil(seatsForHall.length / 2);
-            studentsToSeat = eligibleStudents.slice(0, maxSpacedCapacity);
-
-            if (eligibleStudents.length > studentsToSeat.length) {
-                allMessages.push(`Hall "${hall.name}" was filled to capacity with spaced seating. ${eligibleStudents.length - studentsToSeat.length} students from the assigned set will be placed in other available halls.`);
+        // Sort seats within each hall according to its arrangement constraint
+        const arrangement = hall.constraints?.arrangement || 'horizontal';
+        hallSeats.sort((a, b) => {
+            if (arrangement === 'vertical') {
+                if (a.col !== b.col) return a.col - b.col;
+                return a.row - b.row;
             }
-        } else {
-            // Default logic: interleave students from all allowed sets up to the hall's capacity.
-            if (eligibleStudents.length > 0 && seatsForHall.length > 0) {
-                const studentsBySet = eligibleStudents.reduce((acc, student) => {
-                    if (!acc[student.setId]) {
-                        acc[student.setId] = [];
-                    }
-                    acc[student.setId].push(student);
-                    return acc;
-                }, {} as Record<string, StudentInfo[]>);
-            
-                let activeSetIdsInHall = Object.keys(studentsBySet);
-                let setRotationIndex = 0;
+            // Default to horizontal
+            if (a.row !== b.row) return a.row - b.row;
+            return a.col - b.col;
+        });
+        return hallSeats;
+    });
+
+    if (allStudents.length > availableSeats.length) {
+        return { plan: null, message: `Not enough seats. Required: ${allStudents.length}, Available: ${availableSeats.length}.` };
+    }
+
+    const studentQueues: { [setId: string]: StudentInfo[] } = {};
+    studentSets.forEach(set => {
+        studentQueues[set.id] = allStudents.filter(s => s.setId === set.id);
+    });
+
+    const setCycle = studentSets.map(s => s.id);
+    const assignments = new Map<string, StudentInfo>(); // Key: "hallId-row-col"
+    let currentSetIndex = 0;
+    let isLastSetSpacingActive = false;
+    let studentsAssigned = 0;
+
+    for (const seat of availableSeats) {
+        if (studentsAssigned >= allStudents.length) break;
+
+        const remainingSetsWithStudents = setCycle.filter(id => studentQueues[id].length > 0);
         
-                while (studentsToSeat.length < seatsForHall.length && activeSetIdsInHall.length > 0) {
-                    setRotationIndex = setRotationIndex % activeSetIdsInHall.length;
-                    const currentSetId = activeSetIdsInHall[setRotationIndex];
-                    const studentToTake = studentsBySet[currentSetId].shift();
+        if (remainingSetsWithStudents.length === 1) {
+            if (isLastSetSpacingActive) {
+                isLastSetSpacingActive = false;
+                continue;
+            }
+            isLastSetSpacingActive = true;
+        }
+
+        let studentToAssign: StudentInfo | undefined;
+        let triedSets = 0;
         
-                    if (studentToTake) {
-                        studentsToSeat.push(studentToTake);
-                    }
-        
-                    if (studentsBySet[currentSetId].length === 0) {
-                        activeSetIdsInHall.splice(setRotationIndex, 1);
-                    } else {
-                        setRotationIndex++;
+        while (!studentToAssign && triedSets < setCycle.length) {
+            const currentSetId = setCycle[currentSetIndex];
+            if (studentQueues[currentSetId].length > 0) {
+                studentToAssign = studentQueues[currentSetId].shift();
+            }
+            currentSetIndex = (currentSetIndex + 1) % setCycle.length;
+            triedSets++;
+        }
+
+        if (studentToAssign) {
+            assignments.set(`${seat.hallId}-${seat.row}-${seat.col}`, studentToAssign);
+            studentsAssigned++;
+        }
+    }
+    
+    if (studentsAssigned < allStudents.length) {
+        return { plan: null, message: `Could not assign all students. ${allStudents.length - studentsAssigned} students remaining.`};
+    }
+
+    const finalPlan: SeatingPlan = {};
+    halls.forEach(hall => {
+        const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
+        const maxCol = Math.max(-1, ...hall.layout.map(s => s.col));
+        const hallGrid: Seat[][] = Array.from({ length: maxRow + 1 }, () => Array(maxCol + 1).fill(null));
+        hall.layout.forEach(seatDef => {
+            const student = assignments.get(`${hall.id}-${seatDef.row}-${seatDef.col}`);
+            hallGrid[seatDef.row][seatDef.col] = { ...seatDef, hallId: hall.id, ...(student && { student }) };
+        });
+        finalPlan[hall.id] = hallGrid;
+    });
+
+    return { plan: finalPlan, message: "Classic seating plan generated successfully!" };
+};
+
+export const generateSeatingPlan = async (
+    examData: { halls: Hall[], studentSets: StudentSet[], rules?: string, seatingType?: 'normal' | 'fair' }
+): Promise<{ plan: SeatingPlan | null; message?: string }> => {
+    // --- PRODUCTION NOTE ---
+    // This function calls the Gemini AI. In a real production application, this logic
+    // MUST be on a backend server to protect your API key and handle potential rate limits.
+    // For this self-contained demo, it runs in the browser, assuming the API_KEY is
+    // securely provided in the deployment environment variables.
+    console.log('--- RUNNING AI SEATING ALGORITHM ---');
+    const { halls, studentSets, rules, seatingType } = examData;
+
+    if (!process.env.API_KEY) {
+        return { plan: null, message: "CRITICAL: API_KEY environment variable not set. Cannot contact AI service." };
+    }
+
+    const allStudents = generateStudentList(studentSets);
+    const availableSeats = halls.flatMap(hall => hall.layout.filter(seat => seat.type !== 'faculty'));
+
+    if (allStudents.length > availableSeats.length) {
+        return { plan: null, message: `Not enough seats. Required: ${allStudents.length}, Available: ${availableSeats.length}.` };
+    }
+
+    const promptData = {
+        halls: halls.map(h => ({
+            id: h.id,
+            name: h.name,
+            seats: h.layout.map(s => ({ row: s.row, col: s.col, type: s.type })),
+            constraints: h.constraints
+        })),
+        studentSets: studentSets.map(s => ({
+            id: s.id,
+            subject: s.subject,
+            students: allStudents.filter(stu => stu.setId === s.id).map(stu => stu.id)
+        }))
+    };
+
+    let seatingRules = rules || 'Arrange students fairly.';
+    if (seatingType === 'fair') {
+        seatingRules = `
+            Primary Rule: You MUST follow the Fair Arrangement Algorithm.
+            1.  Assign students to seats by cycling through each student set (e.g., Set A, Set B, Set C, then back to Set A...).
+            2.  This ensures students from the same set are not adjacent.
+            3.  If you reach a point where only students from a single set remain, you MUST place an empty seat between each of those students.
+
+            Additional User Rules (Apply these after satisfying the primary rule):
+            ${rules || 'No additional rules.'}
+        `;
+    }
+
+    const prompt = `
+        You are a highly intelligent exam seating arrangement assistant. Your task is to assign every student to a unique seat based on the provided data and rules.
+
+        **JSON Data:**
+        Here is the complete data for the exam, including all halls, seats, and students:
+        \`\`\`json
+        ${JSON.stringify(promptData, null, 2)}
+        \`\`\`
+
+        **Seating Rules:**
+        ${seatingRules}
+
+        **Your Task:**
+        Assign EVERY student from the JSON data to a unique 'standard' or 'accessible' seat. Do not use 'faculty' seats.
+        You MUST return your response as a single, valid JSON object. The JSON object must conform to the provided schema. The root of the object must be a key named "assignments", which is an array of assignment objects.
+        Do not output any text or explanation before or after the JSON object.
+    `;
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const responseSchema = {
+            type: Type.OBJECT,
+            properties: {
+                assignments: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            studentId: { type: Type.STRING },
+                            hallId: { type: Type.STRING },
+                            row: { type: Type.INTEGER },
+                            col: { type: Type.INTEGER },
+                        },
+                        required: ["studentId", "hallId", "row", "col"]
                     }
                 }
-            }
-    
-            if (eligibleStudents.length > seatsForHall.length) {
-                allMessages.push(`Hall "${hall.name}" was filled to capacity. ${eligibleStudents.length - seatsForHall.length} students from the assigned sets will be placed in other available halls.`);
-            }
+            },
+            required: ["assignments"]
+        };
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: responseSchema,
+            },
+        });
+        
+        const resultJson = JSON.parse(response.text);
+        const assignments: { studentId: string, hallId: string, row: number, col: number }[] = resultJson.assignments;
+        
+        if (assignments.length !== allStudents.length) {
+             return { plan: null, message: `AI Error: The AI did not return an assignment for every student. Expected ${allStudents.length}, got ${assignments.length}. Please try again.` };
         }
-        
-        const studentsToSeatIds = new Set(studentsToSeat.map(s => s.id));
-        const setIdsForThisBatch = new Set(studentsToSeat.map(s => s.setId));
-        const setsForThisBatch = studentSets.filter(s => setIdsForThisBatch.has(s.id));
-        
-        const { assignedSeatsMap, message } = assignStudentsToSeats(seatsForHall, studentsToSeat, setsForThisBatch);
-        if (message) allMessages.push(message);
 
-        const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
-        const maxCol = Math.max(-1, ...hall.layout.map(s => s.col));
-        const hallGrid: Seat[][] = Array.from({ length: maxRow + 1 }, () => Array(maxCol + 1).fill(null));
-        hall.layout.forEach(seatDef => {
-            const key = `${hall.id}-${seatDef.row}-${seatDef.col}`;
-            hallGrid[seatDef.row][seatDef.col] = assignedSeatsMap.get(key) || { ...seatDef, hallId: hall.id };
+        const assignmentsMap = new Map<string, StudentInfo>();
+        assignments.forEach(a => {
+            const studentInfo = allStudents.find(s => s.id === a.studentId);
+            if(studentInfo) {
+                assignmentsMap.set(`${a.hallId}-${a.row}-${a.col}`, studentInfo);
+            }
         });
-        finalPlan[hall.id] = hallGrid;
-        
-        unseatedStudents = unseatedStudents.filter(s => !studentsToSeatIds.has(s.id));
-    }
 
-    // 3. Process remaining students in "No Limit" halls
-    const remainingStudents = unseatedStudents;
-    const noLimitSeats: Seat[] = [];
-    noLimitHalls.forEach(hall => {
-        const sortFunction = hall.constraints?.arrangement === 'vertical'
-            ? (a: SeatDefinition, b: SeatDefinition) => a.col - b.col || a.row - b.row
-            : (a: SeatDefinition, b: SeatDefinition) => a.row - b.row || a.col - b.col;
-        
-        const seatsFromThisHall = hall.layout
-            .filter(seatDef => seatDef.type === 'standard' || seatDef.type === 'accessible')
-            .sort(sortFunction)
-            .map(seatDef => ({ ...seatDef, hallId: hall.id }));
-        
-        noLimitSeats.push(...seatsFromThisHall);
-    });
-
-    if (remainingStudents.length > noLimitSeats.length) {
-        const message = noLimitHalls.length > 0
-            ? `Not enough seats in the 'No Limit' halls for all remaining students. Required: ${remainingStudents.length}, Available: ${noLimitSeats.length}.`
-            : `Not enough space in the 'Advanced' halls. ${remainingStudents.length} students remain unseated, and there are no 'No Limit' halls available.`;
-        return { plan: null, message };
-    }
-
-    const remainingStudentSetIds = new Set(remainingStudents.map(s => s.setId));
-    const remainingStudentSets = studentSets.filter(s => remainingStudentSetIds.has(s.id));
-    
-    const { assignedSeatsMap, message } = assignStudentsToSeats(noLimitSeats, remainingStudents, remainingStudentSets);
-    if (message) allMessages.push(message);
-
-    noLimitHalls.forEach(hall => {
-        const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
-        const maxCol = Math.max(-1, ...hall.layout.map(s => s.col));
-        const hallGrid: Seat[][] = Array.from({ length: maxRow + 1 }, () => Array(maxCol + 1).fill(null));
-        hall.layout.forEach(seatDef => {
-            const key = `${hall.id}-${seatDef.row}-${seatDef.col}`;
-            hallGrid[seatDef.row][seatDef.col] = assignedSeatsMap.get(key) || { ...seatDef, hallId: hall.id };
+        const finalPlan: SeatingPlan = {};
+        halls.forEach(hall => {
+            const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
+            const maxCol = Math.max(-1, ...hall.layout.map(s => s.col));
+            const hallGrid: Seat[][] = Array.from({ length: maxRow + 1 }, () => Array(maxCol + 1).fill(null));
+            hall.layout.forEach(seatDef => {
+                const student = assignmentsMap.get(`${hall.id}-${seatDef.row}-${seatDef.col}`);
+                hallGrid[seatDef.row][seatDef.col] = { ...seatDef, hallId: hall.id, ...(student && { student }) };
+            });
+            finalPlan[hall.id] = hallGrid;
         });
-        finalPlan[hall.id] = hallGrid;
-    });
 
-    return { plan: finalPlan, message: allMessages.join(' \n') };
+        return { plan: finalPlan, message: 'AI-powered seating plan generated successfully!' };
+
+    } catch (error: any) {
+        console.error("Error calling Gemini API:", error);
+        return { plan: null, message: `An error occurred while communicating with the AI service: ${error.message}` };
+    }
 };
 
 
-// --- Hall Template Management ---
+// --- Template Management Functions ---
 
-export const getHallTemplatesForTeacher = (teacherId: string): Promise<HallTemplate[]> => {
-    return Promise.resolve(
-        db.hallTemplates
-            .filter(t => t.createdBy === teacherId)
-            .sort((a,b) => a.name.localeCompare(b.name))
-    );
+export const getHallTemplatesForTeacher = async (teacherId: string): Promise<HallTemplate[]> => {
+    console.log(`SIMULATING API: GET /api/teachers/${teacherId}/hall-templates`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.hallTemplates.filter(t => t.createdBy === teacherId).sort((a,b) => a.name.localeCompare(b.name)));
 };
 
 export const createHallTemplate = async (templateData: { name: string; layout: SeatDefinition[]; }, teacherId: string): Promise<HallTemplate> => {
+    console.log('SIMULATING API: POST /api/hall-templates');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
     const teacher = await findUserById(teacherId);
-    if (!teacher || !teacher.adminId) {
-        throw new Error("Cannot create template: Teacher is not assigned to an admin.");
-    }
-    const newTemplate: HallTemplate = {
-        ...templateData,
-        id: `template${Date.now()}`,
-        createdBy: teacherId,
-        adminId: teacher.adminId,
-    };
+    if (!teacher || !teacher.adminId) throw new Error("Teacher not assigned to an admin.");
+    const newTemplate: HallTemplate = { ...templateData, id: `template${Date.now()}`, createdBy: teacherId, adminId: teacher.adminId };
     db.hallTemplates = [...db.hallTemplates, newTemplate];
     return Promise.resolve(newTemplate);
 };
 
-export const deleteHallTemplate = (templateId: string, teacherId: string): Promise<boolean> => {
+export const deleteHallTemplate = async (templateId: string, teacherId: string): Promise<boolean> => {
+    console.log(`SIMULATING API: DELETE /api/hall-templates/${templateId}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
     const initialLength = db.hallTemplates.length;
     db.hallTemplates = db.hallTemplates.filter(t => !(t.id === templateId && t.createdBy === teacherId));
     return Promise.resolve(db.hallTemplates.length < initialLength);
 };
 
-// --- Student Set Template Management ---
-
-export const getStudentSetTemplatesForTeacher = (teacherId: string): Promise<StudentSetTemplate[]> => {
-    return Promise.resolve(
-        db.studentSetTemplates
-            .filter(t => t.createdBy === teacherId)
-            .sort((a,b) => a.subject.localeCompare(b.subject))
-    );
+export const getStudentSetTemplatesForTeacher = async (teacherId: string): Promise<StudentSetTemplate[]> => {
+    console.log(`SIMULATING API: GET /api/teachers/${teacherId}/student-set-templates`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.studentSetTemplates.filter(t => t.createdBy === teacherId).sort((a,b) => a.subject.localeCompare(b.subject)));
 };
 
 export const createStudentSetTemplate = async (templateData: { subject: string; studentCount: number; }, teacherId: string): Promise<StudentSetTemplate> => {
-     const teacher = await findUserById(teacherId);
-    if (!teacher || !teacher.adminId) {
-        throw new Error("Cannot create template: Teacher is not assigned to an admin.");
-    }
-    const newTemplate: StudentSetTemplate = {
-        ...templateData,
-        id: `settemplate${Date.now()}`,
-        createdBy: teacherId,
-        adminId: teacher.adminId,
-    };
+    console.log('SIMULATING API: POST /api/student-set-templates');
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const teacher = await findUserById(teacherId);
+    if (!teacher || !teacher.adminId) throw new Error("Teacher not assigned to an admin.");
+    const newTemplate: StudentSetTemplate = { ...templateData, id: `settemplate${Date.now()}`, createdBy: teacherId, adminId: teacher.adminId };
     db.studentSetTemplates = [...db.studentSetTemplates, newTemplate];
     return Promise.resolve(newTemplate);
 };
 
-export const deleteStudentSetTemplate = (templateId: string, teacherId: string): Promise<boolean> => {
+export const deleteStudentSetTemplate = async (templateId: string, teacherId: string): Promise<boolean> => {
+    console.log(`SIMULATING API: DELETE /api/student-set-templates/${templateId}`);
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
     const initialLength = db.studentSetTemplates.length;
     db.studentSetTemplates = db.studentSetTemplates.filter(t => !(t.id === templateId && t.createdBy === teacherId));
     return Promise.resolve(db.studentSetTemplates.length < initialLength);

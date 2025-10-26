@@ -120,7 +120,7 @@ const Login: React.FC = () => {
         const newUser = await registerAdmin(registerName, email, registerPassword, registerInstitution);
         setIsLoading(false);
         if (newUser) {
-            setSuccessMessage('Admin account created successfully. A verification link has been sent to your email. You can now log in.');
+            setSuccessMessage('Admin account created successfully. You can now log in.');
             setAuthMode('login');
             setRegisterName('');
             setEmail('');

@@ -40,7 +40,7 @@ const Header: React.FC = () => {
 
     return (
         <>
-            <header className="bg-white dark:bg-slate-800 shadow-md dark:shadow-none dark:border-b dark:border-slate-700 mb-8">
+            <header className="sticky top-0 z-50 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm shadow-md dark:shadow-none dark:border-b dark:border-slate-700">
                 <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         <Logo className="h-9 w-9" />

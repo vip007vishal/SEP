@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, Exam, Role, Hall } from '../types';
 import { 
     getTeachersForAdmin, 
+    getUnassignedTeachers,
     grantTeacherPermission,
     revokeTeacherPermission,
     getExamsForAdmin, 
@@ -24,6 +25,7 @@ const ExcelIcon = () => <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w
 const AdminDashboard: React.FC = () => {
     const { user } = useAuth();
     const [myTeachers, setMyTeachers] = useState<User[]>([]);
+    const [unassignedTeachers, setUnassignedTeachers] = useState<User[]>([]);
     const [isLoadingTeachers, setIsLoadingTeachers] = useState(true);
     const [exams, setExams] = useState<Exam[]>([]);
     const [isLoadingExams, setIsLoadingExams] = useState(true);
@@ -38,8 +40,12 @@ const AdminDashboard: React.FC = () => {
     const fetchAllTeachers = useCallback(async () => {
         if (!user) return;
         setIsLoadingTeachers(true);
-        const assigned = await getTeachersForAdmin(user.id);
+        const [assigned, unassigned] = await Promise.all([
+            getTeachersForAdmin(user.id),
+            getUnassignedTeachers()
+        ]);
         setMyTeachers(assigned);
+        setUnassignedTeachers(unassigned);
         setIsLoadingTeachers(false);
     }, [user]);
 
@@ -209,9 +215,11 @@ const AdminDashboard: React.FC = () => {
                 const hall = examForDownload.halls.find(h => h.id === hallId);
                 if (!element || !hall) return;
 
-                element.style.boxShadow = 'none';
+                // FIX: Cast element to HTMLDivElement to access style property
+                (element as HTMLDivElement).style.boxShadow = 'none';
                 const canvas = await html2canvas(element, { scale: 2, backgroundColor: '#ffffff' });
-                element.style.boxShadow = '';
+                // FIX: Cast element to HTMLDivElement to access style property
+                (element as HTMLDivElement).style.boxShadow = '';
 
                 const dataUrl = canvas.toDataURL('image/png');
                 const link = document.createElement('a');
@@ -233,7 +241,7 @@ const AdminDashboard: React.FC = () => {
 
 
     const getTeacherName = (teacherId: string) => {
-        return myTeachers.find(t => t.id === teacherId)?.name || 'Unknown Teacher';
+        return [...myTeachers, ...unassignedTeachers].find(t => t.id === teacherId)?.name || 'Unknown Teacher';
     };
 
     if (selectedExam) {
@@ -241,7 +249,7 @@ const AdminDashboard: React.FC = () => {
              <>
                 <div className="min-h-screen">
                     <Header />
-                    <main className="max-w-screen-2xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+                    <main className="max-w-screen-2xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                         <div className="flex justify-between items-center mb-4">
                             <Button onClick={() => setSelectedExam(null)} variant="secondary">
                                 &larr; Back to Dashboard
@@ -370,44 +378,65 @@ const AdminDashboard: React.FC = () => {
     return (
         <div className="min-h-screen">
             <Header />
-            <main className="max-w-4xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+            <main className="max-w-4xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
                 <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-200 mb-6">Admin Dashboard</h2>
                 <div className="space-y-8">
                     <Card>
                         <h3 className="text-xl font-semibold mb-4">Teacher Management</h3>
                         {isLoadingTeachers ? <p>Loading teachers...</p> : (
-                            <div>
-                                <h4 className="text-lg font-medium text-slate-600 dark:text-slate-300 mb-2">Institution Teachers ({myTeachers.length})</h4>
-                                <div className="space-y-4">
-                                    {myTeachers.map(teacher => (
-                                        <div key={teacher.id} className="group flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/50 dark:hover:bg-slate-700 rounded-lg transition-colors">
-                                            <div className="flex items-center mb-3 sm:mb-0">
-                                                <UserIcon />
-                                                <div className="ml-4">
-                                                    <p className="font-semibold">{teacher.name}</p>
-                                                    <p className="text-sm text-slate-500 dark:text-slate-400">{teacher.email}</p>
+                            <div className="space-y-6">
+                                <div>
+                                    <h4 className="text-lg font-medium text-slate-600 dark:text-slate-300 mb-2">My Managed Teachers ({myTeachers.length})</h4>
+                                    <div className="space-y-4">
+                                        {myTeachers.map(teacher => (
+                                            <div key={teacher.id} className="group flex items-center justify-between p-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/50 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                                                <div className="flex items-center">
+                                                    <UserIcon />
+                                                    <div className="ml-4">
+                                                        <p className="font-semibold">{teacher.name}</p>
+                                                        <p className="text-sm text-slate-500 dark:text-slate-400">{teacher.email}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center space-x-3">
+                                                    <span className={`text-sm font-medium px-2 py-1 rounded-full ${teacher.permissionGranted ? 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-300'}`}>
+                                                        {teacher.permissionGranted ? 'Permission Granted' : 'Permission Revoked'}
+                                                    </span>
+                                                    <Button variant={teacher.permissionGranted ? 'danger' : 'primary'} className="!py-1 !px-3 text-xs" onClick={() => teacher.permissionGranted ? handleRevokePermission(teacher.id) : handleGrantPermission(teacher.id)}>
+                                                        {teacher.permissionGranted ? 'Revoke' : 'Grant'}
+                                                    </Button>
+                                                    <Button variant="danger" className="!py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteTeacher(teacher.id, teacher.name)}>
+                                                        Delete
+                                                    </Button>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center space-x-3 self-end sm:self-center">
-                                                <span className={`text-xs font-medium px-2 py-1 rounded-full ${teacher.permissionGranted ? 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
-                                                    {teacher.permissionGranted ? 'Approved' : 'Pending Approval'}
-                                                </span>
-                                                {teacher.permissionGranted ? (
-                                                    <Button variant="danger" className="!py-1 !px-3 text-xs" onClick={() => handleRevokePermission(teacher.id)}>
-                                                        Revoke
-                                                    </Button>
-                                                ) : (
+                                        ))}
+                                        {myTeachers.length === 0 && <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-2">No teachers are assigned to you.</p>}
+                                    </div>
+                                </div>
+                                <div>
+                                    <h4 className="text-lg font-medium text-slate-600 dark:text-slate-300 mb-2">Pending Registrations ({unassignedTeachers.length})</h4>
+                                    <div className="space-y-4">
+                                        {unassignedTeachers.map(teacher => (
+                                            <div key={teacher.id} className="group flex items-center justify-between p-4 bg-slate-50 border dark:bg-slate-800 dark:border-slate-700 rounded-lg">
+                                                <div className="flex items-center">
+                                                    <UserIcon />
+                                                    <div className="ml-4">
+                                                        <p className="font-semibold">{teacher.name}</p>
+                                                        <p className="text-sm text-slate-500 dark:text-slate-400">{teacher.email}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center space-x-3">
                                                     <Button variant="primary" className="!py-1 !px-3 text-xs" onClick={() => handleGrantPermission(teacher.id)}>
                                                         Approve
                                                     </Button>
-                                                )}
-                                                <Button variant="danger" className="!py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteTeacher(teacher.id, teacher.name)}>
-                                                    Delete
-                                                </Button>
+                                                     <Button variant="danger" className="!py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => handleDeleteTeacher(teacher.id, teacher.name)}>
+                                                        Delete
+                                                    </Button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
-                                    {myTeachers.length === 0 && <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-2">No teachers have registered for your institution yet.</p>}
+                                        ))}
+                                        {unassignedTeachers.length === 0 && <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-2">No new teacher registrations.</p>}
+                                    </div>
                                 </div>
                             </div>
                         )}
