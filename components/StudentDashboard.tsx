@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Exam, Seat } from '../types';
-import { getExamsForStudent } from '../services/examService';
+import { getExamsForStudent } from '../services/api';
 import Header from './common/Header';
 import Card from './common/Card';
 import SeatingPlanVisualizer from './common/SeatingPlanVisualizer';

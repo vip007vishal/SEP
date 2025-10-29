@@ -1,5 +1,5 @@
 {
-  "name": "sep-oct28-final",
+  "name": "sep-oct29-finished",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -14,7 +14,12 @@
     "react-dom": "^19.1.1",
     "html2canvas": "1.4.1",
     "xlsx": "0.18.5",
-    "@google/genai": "latest"
+    "@google/genai": "latest",
+    "bcryptjs": "^3.0.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "cors": "^2.8.5",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

@@ -14,7 +14,7 @@ import {
     getStudentSetTemplatesForTeacher,
     createStudentSetTemplate,
     deleteStudentSetTemplate
-} from '../services/examService';
+} from '../services/api';
 import Header from './common/Header';
 import Card from './common/Card';
 import Button from './common/Button';

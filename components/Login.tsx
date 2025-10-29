@@ -6,7 +6,7 @@ import Input from './common/Input';
 import Button from './common/Button';
 import Logo from './common/Logo';
 import { Role } from '../types';
-import { getInstitutions } from '../services/examService';
+import { getInstitutions } from '../services/api';
 
 const Login: React.FC = () => {
     const [email, setEmail] = useState('');
