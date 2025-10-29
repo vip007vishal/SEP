@@ -205,7 +205,7 @@ const TeacherDashboard: React.FC = () => {
 
     const handleEditorModeChange = (mode: 'ai' | 'classic') => {
         if (!activeExam) return;
-        setActiveExam(prev => prev ? { ...prev, editorMode: mode } : null);
+        setActiveExam(prev => prev ? { ...prev, editorMode: mode, seatingType: 'normal' } : null);
     };
 
     const handleSeatingTypeChange = (type: 'normal' | 'fair') => {
@@ -708,6 +708,7 @@ const TeacherDashboard: React.FC = () => {
             result = await generateClassicSeatingPlan({
                 halls: parsedExamData.halls as Hall[], 
                 studentSets: parsedExamData.studentSets as StudentSet[], 
+                seatingType: parsedExamData.seatingType || 'normal',
             });
         } else { // 'ai' mode
             result = await generateSeatingPlan({
@@ -896,7 +897,7 @@ const TeacherDashboard: React.FC = () => {
     };
 
     const handleStartCreating = (mode: 'ai' | 'classic') => {
-        setActiveExam({ ...initialNewExamState, createdBy: user?.id || '', adminId: user?.adminId || '', editorMode: mode });
+        setActiveExam({ ...initialNewExamState, createdBy: user?.id || '', adminId: user?.adminId || '', editorMode: mode, seatingType: 'normal' });
         setFormError('');
         setFormWarning('');
     };
@@ -915,6 +916,7 @@ const TeacherDashboard: React.FC = () => {
              result = await generateClassicSeatingPlan({
                 halls: exam.halls, 
                 studentSets: exam.studentSets,
+                seatingType: exam.seatingType || 'normal',
             });
         } else {
              result = await generateSeatingPlan({
@@ -1433,12 +1435,29 @@ const TeacherDashboard: React.FC = () => {
                             ) : (
                                 <Card>
                                     <h3 className="text-xl font-semibold mb-4 border-b dark:border-slate-700 pb-2">Classic Seating Algorithm</h3>
-                                    <div className="p-3 bg-sky-50 dark:bg-sky-500/10 rounded-md text-sm text-sky-700 dark:text-sky-300">
-                                        <p><strong>Classic Mode is active.</strong> This mode uses a predictable algorithm:</p>
-                                        <ul className="list-disc list-inside mt-2 space-y-1">
-                                            <li>Students are seated by cycling through each set (Set A, Set B, Set C, ...).</li>
-                                            <li>If only one set of students remains, an empty seat is placed between each of them.</li>
-                                        </ul>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Seating Type</label>
+                                        <div className="flex gap-2 p-1 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSeatingTypeChange('normal')}
+                                                className={`flex-1 text-center px-3 py-1 text-sm font-semibold rounded-md transition-all ${activeExam.seatingType !== 'fair' ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-400 shadow' : 'text-slate-600 dark:text-slate-300'}`}
+                                            >
+                                                Normal
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSeatingTypeChange('fair')}
+                                                className={`flex-1 text-center px-3 py-1 text-sm font-semibold rounded-md transition-all ${activeExam.seatingType === 'fair' ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-400 shadow' : 'text-slate-600 dark:text-slate-300'}`}
+                                            >
+                                                Fair
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                            {activeExam.seatingType === 'fair'
+                                                ? 'Fair type alternates students and inserts an empty seat between students of the last remaining set.'
+                                                : 'Normal type alternates students but fills all remaining seats without spacing.'}
+                                        </p>
                                     </div>
                                 </Card>
                             )}
