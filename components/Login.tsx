@@ -5,8 +5,9 @@ import Card from './common/Card';
 import Input from './common/Input';
 import Button from './common/Button';
 import Logo from './common/Logo';
+import ThemeToggle from './common/ThemeToggle';
 import { Role } from '../types';
-import { getInstitutions } from '../services/api';
+import { getInstitutions } from '../services/examService';
 
 const Login: React.FC = () => {
     const [email, setEmail] = useState('');
@@ -332,7 +333,10 @@ const Login: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen flex flex-col justify-center items-center p-4">
+        <div className="min-h-screen flex flex-col justify-center items-center p-4 relative">
+            <div className="absolute top-4 right-4">
+                <ThemeToggle />
+            </div>
             <div className="text-center mb-8 flex flex-col items-center gap-4">
                 <Logo className="h-16 w-16" />
                 <div>

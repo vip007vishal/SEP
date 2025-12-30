@@ -1,0 +1,746 @@
+import { GoogleGenAI, Type } from '@google/genai';
+import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role, HallTemplate, StudentSetTemplate, SeatDefinition, StudentInfo, AuditLog } from '../types';
+import { initialDbData } from './mockData';
+
+// We initialize our simulated database from a clean mock data source.
+// This is a deep copy, so the state is fresh on every full page load.
+let db: typeof initialDbData = JSON.parse(JSON.stringify(initialDbData));
+
+const API_LATENCY = 200; // ms to simulate network delay
+
+// --- Helper for Logging ---
+const logActivity = (adminId: string, actorName: string, role: Role, action: string, details: string) => {
+    const newLog: AuditLog = {
+        id: `log${Date.now()}${Math.random().toString(36).substr(2, 5)}`,
+        adminId,
+        actorName,
+        role,
+        action,
+        details,
+        timestamp: new Date().toISOString()
+    };
+    db.auditLogs.unshift(newLog); // Add to beginning
+};
+
+export const getAuditLogs = async (adminId: string): Promise<AuditLog[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.auditLogs.filter(l => l.adminId === adminId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+};
+
+
+// --- User Management Functions ---
+
+export const getInstitutions = async (): Promise<{ id: string, name: string }[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const institutions = db.users
+        .filter(u => u.role === Role.ADMIN && u.institutionName)
+        .map(u => ({ id: u.id, name: u.institutionName! }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    return Promise.resolve(institutions);
+};
+
+export const findUserByEmail = async (email: string): Promise<User | undefined> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.users.find(u => u.email.toLowerCase() === email.toLowerCase()));
+};
+
+export const findUserById = async (id: string): Promise<User | undefined> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.users.find(u => u.id === id));
+};
+
+export const createAdminUser = async (name: string, email: string, password: string, institutionName: string): Promise<User | null> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    if (db.users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+        return Promise.resolve(null); 
+    }
+    const newAdmin: User = {
+        id: `admin${Date.now()}`, name, email, role: Role.ADMIN, password, institutionName,
+    };
+    db.users = [...db.users, newAdmin];
+    return Promise.resolve(newAdmin);
+};
+
+export const createTeacherUser = async (name: string, email: string, password: string, adminIdentifier: string): Promise<User | null> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    if (db.users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+        return Promise.resolve(null);
+    }
+    const admin = db.users.find(u => u.role === Role.ADMIN && (u.id === adminIdentifier || u.institutionName?.toLowerCase() === adminIdentifier.toLowerCase()));
+    if (!admin) { return Promise.resolve(null); }
+
+    const newTeacher: User = {
+        id: `teacher${Date.now()}`, name, email, role: Role.TEACHER, permissionGranted: false, password, adminId: admin.id,
+    };
+    db.users = [...db.users, newTeacher];
+    return Promise.resolve(newTeacher);
+};
+
+export const getTeachersForAdmin = async (adminId: string): Promise<User[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.users.filter(u => u.role === 'TEACHER' && u.adminId === adminId));
+};
+
+export const getUnassignedTeachers = async (): Promise<User[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.users.filter(u => u.role === 'TEACHER' && !u.permissionGranted));
+};
+
+export const grantTeacherPermission = async (teacherId: string, adminId: string): Promise<User | undefined> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    let updatedTeacher: User | undefined = undefined;
+    db.users = db.users.map(user => {
+        if (user.id === teacherId && user.role === 'TEACHER') {
+            updatedTeacher = { ...user, permissionGranted: true, adminId: adminId };
+            return updatedTeacher;
+        }
+        return user;
+    });
+    if (updatedTeacher) {
+        logActivity(adminId, 'Admin', Role.ADMIN, 'GRANTED_PERMISSION', `Approved teacher account: ${updatedTeacher.name}`);
+    }
+    return Promise.resolve(updatedTeacher);
+};
+
+export const revokeTeacherPermission = async (teacherId: string): Promise<User | undefined> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    let updatedTeacher: User | undefined = undefined;
+    db.users = db.users.map(user => {
+        if (user.id === teacherId && user.role === 'TEACHER') {
+            updatedTeacher = { ...user, permissionGranted: false };
+            return updatedTeacher;
+        }
+        return user;
+    });
+    if (updatedTeacher && updatedTeacher.adminId) {
+        logActivity(updatedTeacher.adminId, 'Admin', Role.ADMIN, 'REVOKED_PERMISSION', `Revoked permission for: ${updatedTeacher.name}`);
+    }
+    return Promise.resolve(updatedTeacher);
+};
+
+export const deleteTeacher = async (teacherId: string, adminId: string): Promise<boolean> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+
+    const initialCount = db.users.length;
+    // Strictly filter out the teacher.
+    db.users = db.users.filter(u => u.id !== teacherId);
+    
+    // Check if delete happened
+    if (db.users.length === initialCount) {
+        return Promise.resolve(false);
+    }
+
+    // Cascade delete related data
+    db.exams = db.exams.filter(exam => exam.createdBy !== teacherId);
+    db.hallTemplates = db.hallTemplates.filter(t => t.createdBy !== teacherId);
+    db.studentSetTemplates = db.studentSetTemplates.filter(t => t.createdBy !== teacherId);
+    
+    logActivity(adminId, 'Admin', Role.ADMIN, 'DELETED_TEACHER', `Deleted teacher account.`);
+    return Promise.resolve(true);
+};
+
+
+// --- Exam Management Functions ---
+
+export const getExamsForAdmin = async (adminId: string): Promise<Exam[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve([...db.exams].filter(e => e.adminId === adminId).sort((a, b) => b.id.localeCompare(a.id)));
+};
+
+export const getExamsForStudent = async (registerNumber: string, adminId: string): Promise<Exam[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    // (Logic for student exams remains the same, generating on-the-fly for demo)
+    for (const exam of db.exams) {
+        if (!exam.seatingPlan && exam.adminId === adminId) {
+            let result;
+            if(exam.editorMode === 'classic' || exam.editorMode === 'advanced') {
+                result = await generateClassicSeatingPlan({ halls: exam.halls, studentSets: exam.studentSets, seatingType: exam.seatingType });
+            } else {
+                result = await generateSeatingPlan({ halls: exam.halls, studentSets: exam.studentSets, rules: exam.aiSeatingRules, seatingType: exam.seatingType, editorMode: exam.editorMode });
+            }
+            if (result.plan) exam.seatingPlan = result.plan;
+        }
+    }
+    const studentExams = db.exams.filter(exam => {
+        if (exam.adminId !== adminId || !exam.seatingPlan) return false;
+        return Object.values(exam.seatingPlan).some(hallPlan => 
+            hallPlan.some(row => row.some(seat => seat?.student?.id === registerNumber))
+        );
+    });
+    return Promise.resolve(studentExams.sort((a, b) => b.id.localeCompare(a.id)));
+};
+
+export const loginStudent = async (registerNumber: string, adminId: string): Promise<User | null> => {
+     if (/^\d+$/.test(registerNumber) && registerNumber.length > 0) {
+        const studentUser: User = {
+            id: registerNumber, name: `Student ${registerNumber}`, email: '', role: Role.STUDENT, registerNumber: registerNumber, adminId: adminId,
+        };
+        logActivity(adminId, studentUser.name, Role.STUDENT, 'STUDENT_LOGIN', `Student ${registerNumber} logged in.`);
+        return Promise.resolve(studentUser);
+    }
+    return Promise.resolve(null);
+};
+
+export const getExamsForTeacher = async (teacherId: string): Promise<Exam[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const teacher = db.users.find(u => u.id === teacherId);
+    if (!teacher || !teacher.adminId) return Promise.resolve([]);
+    return Promise.resolve(db.exams.filter(e => e.adminId === teacher.adminId).sort((a,b) => b.id.localeCompare(a.id)));
+};
+
+export const createExam = async (examData: any, teacherId: string): Promise<Exam> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const teacher = await findUserById(teacherId);
+    if (!teacher || !teacher.adminId) throw new Error("Teacher not assigned.");
+
+    const newExam: Exam = {
+        ...examData,
+        id: `exam${Date.now()}`,
+        createdBy: teacherId,
+        adminId: teacher.adminId,
+        halls: examData.halls.map((h:any, i:number) => ({ ...h, id: `hall${Date.now()}${i}` })),
+        studentSets: examData.studentSets.map((s:any, i:number) => ({ ...s, id: `set${Date.now()}${i}` })),
+        seatingPlan: undefined,
+    };
+    db.exams = [...db.exams, newExam];
+    logActivity(teacher.adminId, teacher.name, Role.TEACHER, 'CREATED_EXAM', `Created new exam: "${newExam.title}"`);
+    return Promise.resolve(newExam);
+};
+
+export const updateExam = async (updatedExam: Exam): Promise<Exam> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const teacher = db.users.find(u => u.id === updatedExam.createdBy);
+    db.exams = db.exams.map(exam => exam.id === updatedExam.id ? updatedExam : exam);
+    if (teacher && teacher.adminId) logActivity(teacher.adminId, teacher.name, Role.TEACHER, 'UPDATED_EXAM', `Updated exam: "${updatedExam.title}"`);
+    return Promise.resolve(updatedExam);
+};
+
+export const updateExamSeatingPlan = async (examId: string, newPlan: SeatingPlan, updaterId: string): Promise<boolean> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const examIndex = db.exams.findIndex(e => e.id === examId);
+    if (examIndex === -1) return Promise.resolve(false);
+    db.exams[examIndex].seatingPlan = newPlan;
+    return Promise.resolve(true);
+};
+
+export const deleteExam = async (examId: string, ownerId: string, role: Role): Promise<boolean> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    
+    // Find exam
+    const exam = db.exams.find(e => e.id === examId);
+    if (!exam) return Promise.resolve(false);
+
+    // Permission: Allow if Admin or Teacher owns it
+    const isAllowed = (role === Role.ADMIN && exam.adminId === ownerId) || 
+                      (role === Role.TEACHER); // Simplified for teachers to allow deleting shared exams in institution
+
+    if (isAllowed) {
+        const initialLen = db.exams.length;
+        db.exams = db.exams.filter(e => e.id !== examId);
+        
+        if (db.exams.length < initialLen) {
+            logActivity(exam.adminId, role === Role.ADMIN ? 'Admin' : 'Teacher', role, 'DELETED_EXAM', `Deleted exam: "${exam.title}"`);
+            return Promise.resolve(true);
+        }
+    }
+    return Promise.resolve(false);
+};
+
+// --- Template Management Functions ---
+
+export const getHallTemplatesForTeacher = async (teacherId: string): Promise<HallTemplate[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const teacher = db.users.find(u => u.id === teacherId);
+    if (!teacher || !teacher.adminId) return Promise.resolve([]);
+    return Promise.resolve(db.hallTemplates.filter(t => t.adminId === teacher.adminId));
+};
+
+export const getHallTemplatesForAdmin = async (adminId: string): Promise<HallTemplate[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.hallTemplates.filter(t => t.adminId === adminId));
+};
+
+export const createHallTemplate = async (templateData: any, creatorId: string): Promise<HallTemplate> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const creator = await findUserById(creatorId);
+    if (!creator) throw new Error("Creator not found.");
+    const adminId = creator.role === Role.ADMIN ? creator.id : creator.adminId!;
+    
+    const newTemplate: HallTemplate = { ...templateData, id: `template${Date.now()}`, createdBy: creatorId, adminId: adminId };
+    db.hallTemplates = [...db.hallTemplates, newTemplate];
+    return Promise.resolve(newTemplate);
+};
+
+export const updateHallTemplate = async (templateId: string, data: any, updaterId: string): Promise<HallTemplate | null> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const index = db.hallTemplates.findIndex(t => t.id === templateId);
+    if (index === -1) return Promise.resolve(null);
+    
+    const updated = { ...db.hallTemplates[index], ...data };
+    db.hallTemplates[index] = updated;
+    return Promise.resolve(updated);
+};
+
+export const deleteHallTemplate = async (templateId: string, deleterId: string, role: Role): Promise<boolean> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const initialLen = db.hallTemplates.length;
+    db.hallTemplates = db.hallTemplates.filter(t => t.id !== templateId);
+    return Promise.resolve(db.hallTemplates.length < initialLen);
+};
+
+export const getStudentSetTemplatesForTeacher = async (teacherId: string): Promise<StudentSetTemplate[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const teacher = db.users.find(u => u.id === teacherId);
+    if (!teacher || !teacher.adminId) return Promise.resolve([]);
+    return Promise.resolve(db.studentSetTemplates.filter(t => t.adminId === teacher.adminId));
+};
+
+export const getStudentSetTemplatesForAdmin = async (adminId: string): Promise<StudentSetTemplate[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.studentSetTemplates.filter(t => t.adminId === adminId));
+};
+
+export const createStudentSetTemplate = async (templateData: any, creatorId: string): Promise<StudentSetTemplate> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const creator = await findUserById(creatorId);
+    if (!creator) throw new Error("Creator not found.");
+    const adminId = creator.role === Role.ADMIN ? creator.id : creator.adminId!;
+
+    const newTemplate: StudentSetTemplate = { ...templateData, id: `settemplate${Date.now()}`, createdBy: creatorId, adminId: adminId };
+    db.studentSetTemplates = [...db.studentSetTemplates, newTemplate];
+    return Promise.resolve(newTemplate);
+};
+
+export const updateStudentSetTemplate = async (templateId: string, data: any, updaterId: string): Promise<StudentSetTemplate | null> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const index = db.studentSetTemplates.findIndex(t => t.id === templateId);
+    if (index === -1) return Promise.resolve(null);
+    
+    const updated = { ...db.studentSetTemplates[index], ...data };
+    db.studentSetTemplates[index] = updated;
+    return Promise.resolve(updated);
+};
+
+export const deleteStudentSetTemplate = async (templateId: string, deleterId: string, role: Role): Promise<boolean> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const initialLen = db.studentSetTemplates.length;
+    db.studentSetTemplates = db.studentSetTemplates.filter(t => t.id !== templateId);
+    return Promise.resolve(db.studentSetTemplates.length < initialLen);
+};
+
+// ... keep existing generation functions (generateClassicSeatingPlan, generateSeatingPlan, generateLayoutFromImage) as they were ...
+
+const generateStudentList = (studentSets: StudentSet[]): StudentInfo[] => {
+    const allStudents: StudentInfo[] = [];
+    studentSets.forEach(set => {
+        if (set.students && set.students.length > 0) {
+            set.students.forEach((studentId, i) => allStudents.push({ id: studentId, setId: set.id, setNumber: i + 1 }));
+        } else {
+            // Determine dynamic padding based on student count
+            // e.g. If count is 152 (3 digits), length is 3, IDs start with 001
+            // e.g. If count is 26 (2 digits), length is 2, IDs start with 01
+            const totalCount = Number(set.studentCount);
+            const paddingLength = Math.max(2, totalCount.toString().length);
+            
+            // Clean up the subject to use as a prefix (e.g., 'Physics 101' -> 'PHY')
+            // If it's numeric, use it as is (e.g. '101' -> '101')
+            const subjectPrefix = /^\d+$/.test(set.subject) 
+                ? set.subject 
+                : (set.subject.substring(0, 3).toUpperCase());
+
+            for (let i = 0; i < totalCount; i++) {
+                const studentPaddedNumber = (i + 1).toString().padStart(paddingLength, '0');
+                allStudents.push({ id: `${subjectPrefix}${studentPaddedNumber}`, setId: set.id, setNumber: i + 1 });
+            }
+        }
+    });
+    return allStudents;
+}
+
+export const generateClassicSeatingPlan = async (
+    examData: { halls: Hall[], studentSets: StudentSet[], seatingType?: 'normal' | 'fair' }
+): Promise<{ plan: SeatingPlan | null; message?: string }> => {
+    // console.log(`--- RUNNING CLASSIC SEATING ALGORITHM (Mode: ${examData.seatingType || 'normal'}) ---`);
+    const { halls, studentSets, seatingType = 'normal' } = examData;
+
+    const allStudents = generateStudentList(studentSets);
+    const assignments = new Map<string, StudentInfo>();
+    
+    const studentQueues: { [setId: string]: StudentInfo[] } = {};
+    studentSets.forEach(set => {
+        studentQueues[set.id] = allStudents.filter(s => s.setId === set.id);
+    });
+
+    if (seatingType === 'fair') {
+        let seatSkipCounter = 0;
+        let setCycleIndex = 0;
+
+        for (const hall of halls) {
+            const seatsInHall = hall.layout
+                .filter(seat => seat.type !== 'faculty')
+                .sort((a, b) => {
+                    const arrangement = hall.constraints?.arrangement || 'horizontal';
+                    if (arrangement === 'vertical') {
+                        if (a.col !== b.col) return a.col - b.col;
+                        return a.row - b.row;
+                    }
+                    if (a.row !== b.row) return a.row - b.row;
+                    return a.col - b.col;
+                });
+
+            const allPossibleSetIdsForHall = hall.constraints?.type === 'advanced'
+                ? hall.constraints.allowedSetIds!
+                : Object.keys(studentQueues);
+            
+            for (const seat of seatsInHall) {
+                const eligibleSetsForThisHall = allPossibleSetIdsForHall.filter(id => studentQueues[id].length > 0);
+
+                if (eligibleSetsForThisHall.length === 0) {
+                    break;
+                }
+
+                if (eligibleSetsForThisHall.length === 1) {
+                    if (seatSkipCounter > 0) {
+                        seatSkipCounter--;
+                        continue;
+                    }
+
+                    const setIdToUse = eligibleSetsForThisHall[0];
+                    if (studentQueues[setIdToUse] && studentQueues[setIdToUse].length > 0) {
+                        const studentToAssign = studentQueues[setIdToUse].shift()!;
+                        assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                        seatSkipCounter = 1;
+                    } else {
+                        break;
+                    }
+                } else {
+                    let studentToAssign: StudentInfo | undefined;
+                    let triedSets = 0;
+
+                    while (!studentToAssign && triedSets < eligibleSetsForThisHall.length) {
+                        const currentSetId = eligibleSetsForThisHall[setCycleIndex % eligibleSetsForThisHall.length];
+                        if (studentQueues[currentSetId].length > 0) {
+                            studentToAssign = studentQueues[currentSetId].shift();
+                        }
+                        setCycleIndex++;
+                        triedSets++;
+                    }
+
+                    if (studentToAssign) {
+                        assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        let setCycleIndex = 0;
+        for (const hall of halls) {
+            const seatsInHall = hall.layout
+                .filter(seat => seat.type !== 'faculty')
+                .sort((a, b) => {
+                    const arrangement = hall.constraints?.arrangement || 'horizontal';
+                    if (arrangement === 'vertical') {
+                        if (a.col !== b.col) return a.col - b.col;
+                        return a.row - b.row;
+                    }
+                    if (a.row !== b.row) return a.row - b.row;
+                    return a.col - b.col;
+                });
+
+            const getEligibleSetsForHall = () => {
+                const allRemaining = Object.keys(studentQueues).filter(id => studentQueues[id].length > 0);
+                const allowedSetIds = hall.constraints?.type === 'advanced' ? hall.constraints.allowedSetIds : null;
+                return allowedSetIds ? allRemaining.filter(id => allowedSetIds.includes(id)) : allRemaining;
+            };
+
+            for (const seat of seatsInHall) {
+                const eligibleSetsForThisHall = getEligibleSetsForHall();
+                if (eligibleSetsForThisHall.length === 0) break;
+
+                let studentToAssign: StudentInfo | undefined;
+                let triedSets = 0;
+
+                while (!studentToAssign && triedSets < eligibleSetsForThisHall.length) {
+                    const currentSetId = eligibleSetsForThisHall[setCycleIndex % eligibleSetsForThisHall.length];
+                    if (studentQueues[currentSetId].length > 0) {
+                        studentToAssign = studentQueues[currentSetId].shift();
+                    }
+                    setCycleIndex++;
+                    triedSets++;
+                }
+
+                if (studentToAssign) {
+                    assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    const unassignedStudents = Object.values(studentQueues).flat();
+    if (unassignedStudents.length > 0) {
+        if (seatingType === 'fair') {
+            return { plan: null, message: "not enough seats for fair seating" };
+        }
+        return { plan: null, message: `Failed to assign all students. ${unassignedStudents.length} students remain unplaced, possibly due to lack of seats.` };
+    }
+    
+    const finalPlan: SeatingPlan = {};
+    halls.forEach(hall => {
+        const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
+        const maxCol = Math.max(-1, ...hall.layout.map(s => s.col));
+        const hallGrid: Seat[][] = Array.from({ length: maxRow + 1 }, () => Array(maxCol + 1).fill(null));
+        hall.layout.forEach(seatDef => {
+            const student = assignments.get(`${hall.id}-${seatDef.row}-${seatDef.col}`);
+            hallGrid[seatDef.row][seatDef.col] = { ...seatDef, hallId: hall.id, ...(student && { student }) };
+        });
+        finalPlan[hall.id] = hallGrid;
+    });
+
+    return { plan: finalPlan, message: "Classic seating plan generated successfully!" };
+};
+
+
+export const generateSeatingPlan = async (
+    examData: { halls: Hall[], studentSets: StudentSet[], rules?: string, seatingType?: 'normal' | 'fair', editorMode?: string }
+): Promise<{ plan: SeatingPlan | null; message?: string }> => {
+    const { halls, studentSets, rules, seatingType, editorMode } = examData;
+
+    if (!process.env.API_KEY) {
+        return { plan: null, message: "CRITICAL: API_KEY environment variable not set. Cannot contact AI service." };
+    }
+
+    const allStudents = generateStudentList(studentSets);
+    const availableSeats = halls.flatMap(hall => hall.layout.filter(seat => seat.type !== 'faculty'));
+    
+    if (seatingType !== 'fair' && allStudents.length > availableSeats.length) {
+        return { plan: null, message: `Not enough seats. Required: ${allStudents.length}, Available: ${availableSeats.length}.` };
+    }
+
+
+    const promptData = {
+        halls: halls.map(h => ({
+            id: h.id,
+            name: h.name,
+            seats: h.layout.map(s => ({ row: s.row, col: s.col, type: s.type })),
+            constraints: h.constraints
+        })),
+        studentSets: studentSets.map(s => ({
+            id: s.id,
+            subject: s.subject,
+            students: allStudents.filter(stu => stu.setId === s.id).map(stu => stu.id)
+        }))
+    };
+
+    let seatingRules = '';
+    if (seatingType === 'fair') {
+        seatingRules = `
+            **CRITICAL: DYNAMIC HALL-CENTRIC FAIR SEATING ALGORITHM**
+            Your primary goal is to create a fair seating arrangement. This requires a dynamic, hall-centric approach.
+            Process halls in the order they are provided. For each seat in a hall:
+            1.  **Re-evaluate:** Determine the list of student sets that are eligible for the CURRENT hall (based on hall constraints) and still have students left to be seated.
+            2.  **Decide Strategy:**
+                *   If the list from step 1 contains only ONE set, you MUST use **"Fair Spacing" mode** for this seat. This means you place one student, and then you MUST leave the next available seat EMPTY. The pattern must be [STUDENT], [EMPTY], [STUDENT], [EMPTY].
+                *   If the list from step 1 contains MULTIPLE sets, you MUST use **"Normal Placement" mode**. This means you use a round-robin approach to pick a student from the eligible sets and you MUST fill the current seat without leaving a gap.
+            3.  **Repeat:** Move to the next seat and go back to step 1. This re-evaluation for every seat is the most important rule.
+            If you cannot place every single student while following these rules (especially the spacing rule when required), you MUST return a plan with fewer students than the total, which will signal an error.
+        `;
+    } else { 
+        seatingRules = `
+            **CRITICAL: NORMAL SEATING ALGORITHM**
+            You must fill every available seat without leaving any empty spaces between students. When placing students while multiple sets still have unseated students, assign them by cycling through each student set (e.g., Set A, Set B, Set C, then back to Set A...). This ensures students from the same set are not adjacent.
+        `;
+    }
+
+    let constraintsPrompt = "";
+    if (editorMode === 'ai-advanced') {
+        constraintsPrompt = `
+            **CRITICAL: STRICT HARD CONSTRAINTS**
+            You are operating in 'AI+Advanced' mode. The user has defined specific constraints for halls AND likely provided custom AI instructions.
+            1. **HARD CONSTRAINTS (Absolute Priority):** The 'constraints.allowedSetIds' for each hall are inviolable. You MUST NEVER place a student in a hall if their Set ID is not in that hall's allowed list (unless the list is empty/no-limit).
+            2. **ARRANGEMENT:** Strict adherence to 'constraints.arrangement' (horizontal vs vertical filling).
+            3. **USER INSTRUCTIONS:** Apply the user's custom instructions (below) ONLY within the boundaries of the Hard Constraints. If a user instruction contradicts a Hard Constraint, the Constraint wins.
+        `;
+    }
+
+    const prompt = `
+        You are a highly intelligent exam seating arrangement assistant. Your task is to assign every student to a unique seat based on the provided data and rules.
+
+        **JSON Data:**
+        \`\`\`json
+        ${JSON.stringify(promptData, null, 2)}
+        \`\`\`
+        
+        **Seating Rules (Apply these based on the exam's seating type):**
+        ${seatingRules}
+
+        **AI+Advanced Constraints (STRICTLY FOLLOW IF IN AI+ADVANCED MODE):**
+        ${constraintsPrompt}
+
+        **Additional User-Provided Rules:**
+        ${rules || 'No additional rules.'}
+
+
+        **Your Task:**
+        Assign EVERY student from the JSON data to a unique 'standard' or 'accessible' seat. Do not use 'faculty' seats.
+        You MUST return your response as a single, valid JSON object. The JSON object must conform to the provided schema. The root of the object must be a key named "assignments", which is an array of assignment objects.
+        Do not output any text or explanation before or after the JSON object.
+    `;
+
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const responseSchema = {
+            type: Type.OBJECT,
+            properties: {
+                assignments: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            studentId: { type: Type.STRING },
+                            hallId: { type: Type.STRING },
+                            row: { type: Type.INTEGER },
+                            col: { type: Type.INTEGER },
+                        },
+                        required: ["studentId", "hallId", "row", "col"]
+                    }
+                }
+            },
+            required: ["assignments"]
+        };
+        
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: responseSchema,
+            },
+        });
+        
+        const resultJson = JSON.parse(response.text);
+        const assignments: { studentId: string, hallId: string, row: number, col: number }[] = resultJson.assignments;
+        
+        if (assignments.length !== allStudents.length) {
+             if (seatingType === 'fair') {
+                return { plan: null, message: "not enough seats for fair seating" };
+             }
+             return { plan: null, message: `AI Error: The AI did not return an assignment for every student. Expected ${allStudents.length}, got ${assignments.length}. This may be because a constraint made a full assignment impossible.` };
+        }
+
+        const assignmentsMap = new Map<string, StudentInfo>();
+        assignments.forEach(a => {
+            const studentInfo = allStudents.find(s => s.id === a.studentId);
+            if(studentInfo) {
+                assignmentsMap.set(`${a.hallId}-${a.row}-${a.col}`, studentInfo);
+            }
+        });
+
+        const finalPlan: SeatingPlan = {};
+        halls.forEach(hall => {
+            const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
+            const maxCol = Math.max(-1, ...hall.layout.map(s => s.col));
+            const hallGrid: Seat[][] = Array.from({ length: maxRow + 1 }, () => Array(maxCol + 1).fill(null));
+            hall.layout.forEach(seatDef => {
+                const student = assignmentsMap.get(`${hall.id}-${seatDef.row}-${seatDef.col}`);
+                hallGrid[seatDef.row][seatDef.col] = { ...seatDef, hallId: hall.id, ...(student && { student }) };
+            });
+            finalPlan[hall.id] = hallGrid;
+        });
+
+        return { plan: finalPlan, message: 'AI-powered seating plan generated successfully!' };
+
+    } catch (error: any) {
+        console.error("Error calling Gemini API:", error);
+        return { plan: null, message: `An error occurred while communicating with the AI service: ${error.message}` };
+    }
+};
+
+export const generateLayoutFromImage = async (base64Image: string, mimeType: string): Promise<{ layout: SeatDefinition[], rows: number, cols: number } | null> => {
+    if (!process.env.API_KEY) {
+        console.error("API_KEY not set");
+        return null;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    const prompt = `
+        You are an expert in extracting structured data from visual seating plans.
+        The user has uploaded an image of a classroom layout (photo, blueprint, or hand-drawn sketch).
+        Your job is to digitize this into a grid.
+
+        **Instructions:**
+        1. **Analyze the Grid:** Identify the rows and columns of student seats.
+        2. **Ignore Irrelevant Objects:** Do not count teacher's desks, windows, or doors as seats.
+        3. **Represent Aisles:** If there is a walkway between groups of seats, represent it as a column of '0's (zeros).
+        4. **Represent Seats:** Represent each student seat as a '1' (one).
+        5. **Rectify Geometry:** If the image is a perspective shot (angled), flatten it mentally to a 2D top-down view.
+        6. **Consistency:** Ensure all rows have the same length by padding with '0's if necessary.
+
+        **Output:** A JSON object with the grid matrix.
+    `;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: mimeType, data: base64Image } },
+                    { text: prompt }
+                ]
+            },
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        rows: { type: Type.INTEGER },
+                        cols: { type: Type.INTEGER },
+                        matrix: {
+                            type: Type.ARRAY,
+                            items: { type: Type.STRING }
+                        }
+                    },
+                    required: ["rows", "cols", "matrix"]
+                }
+            }
+        });
+
+        const text = response.text;
+        if (!text) return null;
+        
+        const result = JSON.parse(text);
+        const matrix: string[] = result.matrix;
+        
+        if (!matrix || !Array.isArray(matrix) || matrix.length === 0) return null;
+
+        const rows = matrix.length;
+        const cols = Math.max(...matrix.map(row => row.length));
+
+        const layout: SeatDefinition[] = [];
+
+        for (let r = 0; r < rows; r++) {
+            const rowStr = matrix[r];
+            for (let c = 0; c < rowStr.length; c++) {
+                const char = rowStr[c];
+                if (char === '1') {
+                     layout.push({
+                        id: `seat-${r}-${c}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+                        row: r,
+                        col: c,
+                        type: 'standard'
+                    });
+                }
+            }
+        }
+
+        return { layout, rows, cols };
+
+    } catch (e) {
+        console.error("AI Image Analysis Failed", e);
+        return null;
+    }
+};

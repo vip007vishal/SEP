@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
 
-type Theme = 'light' | 'dark' | 'black' | 'lavender' | 'lightblue' | 'limegreen' | 'lightred' | 'lightyellow' | 'lightpink';
+type Theme = 'light' | 'dark' | 'black' | 'lavender' | 'lightblue' | 'limegreen' | 'lightred' | 'lightyellow' | 'lightpink' | 'lightindigo';
 
 interface ThemeContextType {
     theme: Theme;
@@ -23,7 +23,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     useEffect(() => {
         const root = window.document.documentElement;
-        root.classList.remove('dark', 'black', 'lavender', 'lightblue', 'limegreen', 'lightred', 'lightyellow', 'lightpink'); // Remove all theme classes first
+        root.classList.remove('dark', 'black', 'lavender', 'lightblue', 'limegreen', 'lightred', 'lightyellow', 'lightpink', 'lightindigo'); // Remove all theme classes first
 
         if (theme === 'dark') {
             root.classList.add('dark');
@@ -41,6 +41,8 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             root.classList.add('lightyellow');
         } else if (theme === 'lightpink') {
             root.classList.add('lightpink');
+        } else if (theme === 'lightindigo') {
+            root.classList.add('lightindigo');
         }
         
         localStorage.setItem('theme', theme);
@@ -56,7 +58,8 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
             if (prevTheme === 'limegreen') return 'lightred';
             if (prevTheme === 'lightred') return 'lightyellow';
             if (prevTheme === 'lightyellow') return 'lightpink';
-            return 'light'; // from 'lightpink'
+            if (prevTheme === 'lightpink') return 'lightindigo';
+            return 'light'; // from 'lightindigo'
         });
     };
 

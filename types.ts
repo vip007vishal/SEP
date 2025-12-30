@@ -1,3 +1,4 @@
+
 export enum Role {
     ADMIN = 'ADMIN',
     TEACHER = 'TEACHER',
@@ -36,6 +37,7 @@ export interface Hall {
     name: string;
     layout: SeatDefinition[];
     constraints?: HallConstraint;
+    frontDirection?: 'top' | 'bottom' | 'left' | 'right';
 }
 
 export interface HallTemplate {
@@ -70,7 +72,7 @@ export interface Exam {
     seatingPlan?: SeatingPlan;
     aiSeatingRules?: string;
     seatingType?: 'normal' | 'fair';
-    editorMode?: 'ai' | 'classic';
+    editorMode?: 'ai' | 'classic' | 'advanced' | 'ai-advanced';
     createdBy: string; // teacherId
     adminId: string;
 }
@@ -88,4 +90,14 @@ export interface Seat extends SeatDefinition {
 
 export interface SeatingPlan {
     [hallId: string]: Seat[][];
+}
+
+export interface AuditLog {
+    id: string;
+    adminId: string; // The institution context
+    actorName: string;
+    role: Role;
+    action: string; // e.g. 'CREATED_EXAM', 'STUDENT_LOGIN'
+    details: string;
+    timestamp: string;
 }

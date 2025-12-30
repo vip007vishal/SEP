@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, Role } from '../../types';
-import { findUserById } from '../../services/api';
+import { findUserById } from '../../services/examService';
 import Card from './Card';
 import Button from './Button';
 

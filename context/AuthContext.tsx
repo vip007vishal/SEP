@@ -1,7 +1,7 @@
 
 import React, { createContext, useState, useContext, ReactNode } from 'react';
 import { User } from '../types';
-import { login as apiLogin, loginStudent as apiLoginStudent, registerTeacher as apiRegisterTeacher, registerAdmin as apiRegisterAdmin } from '../services/api';
+import { login as apiLogin, logout as apiLogout, loginStudent as apiLoginStudent, registerTeacher as apiRegisterTeacher, registerAdmin as apiRegisterAdmin } from '../services/authService';
 
 interface AuthContextType {
     user: User | null;
@@ -22,14 +22,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     const login = async (email: string, pass: string): Promise<User | null> => {
-        const response = await apiLogin(email, pass);
-        if (response) {
-            setUser(response.user);
-            localStorage.setItem('user', JSON.stringify(response.user));
-            localStorage.setItem('authToken', response.token);
-            return response.user;
+        const loggedInUser = await apiLogin(email, pass);
+        if (loggedInUser) {
+            setUser(loggedInUser);
+            localStorage.setItem('user', JSON.stringify(loggedInUser));
         }
-        return null;
+        return loggedInUser;
     };
 
     const registerTeacher = async (name: string, email: string, password: string, adminIdentifier: string): Promise<User | null> => {
@@ -46,20 +44,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     const loginStudent = async (registerNumber: string, adminId: string): Promise<User | null> => {
-        const response = await apiLoginStudent(registerNumber, adminId);
-        if (response) {
-            setUser(response.user);
-            localStorage.setItem('user', JSON.stringify(response.user));
-            localStorage.setItem('authToken', response.token);
-            return response.user;
+        const loggedInUser = await apiLoginStudent(registerNumber, adminId);
+        if (loggedInUser) {
+            setUser(loggedInUser);
+            localStorage.setItem('user', JSON.stringify(loggedInUser));
         }
-        return null;
+        return loggedInUser;
     };
 
     const logout = () => {
+        apiLogout();
         setUser(null);
         localStorage.removeItem('user');
-        localStorage.removeItem('authToken');
     };
     
     const isAuthenticated = !!user;
