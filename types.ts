@@ -1,5 +1,6 @@
 
 export enum Role {
+    SUPER_ADMIN = 'SUPER_ADMIN',
     ADMIN = 'ADMIN',
     TEACHER = 'TEACHER',
     STUDENT = 'STUDENT',
@@ -13,7 +14,7 @@ export interface User {
     email: string;
     role: Role;
     password?: string; // For login
-    permissionGranted?: boolean; // For teachers
+    permissionGranted?: boolean; // For teachers and admins
     registerNumber?: string; // For students
     adminId?: string; // Link teacher to an admin, or student to an institution session
     institutionName?: string; // For admins

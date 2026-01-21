@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -5,6 +6,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { Role } from './types';
 
 import Login from './components/Login';
+import SuperAdminDashboard from './components/SuperAdminDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import TeacherDashboard from './components/TeacherDashboard';
 import StudentDashboard from './components/StudentDashboard';
@@ -16,6 +18,14 @@ const AppRoutes: React.FC = () => {
     return (
         <Routes>
             <Route path="/login" element={<Login />} />
+            <Route 
+                path="/super-admin" 
+                element={
+                    <ProtectedRoute allowedRoles={[Role.SUPER_ADMIN]}>
+                        <SuperAdminDashboard />
+                    </ProtectedRoute>
+                } 
+            />
             <Route 
                 path="/admin" 
                 element={
@@ -40,7 +50,7 @@ const AppRoutes: React.FC = () => {
                     </ProtectedRoute>
                 } 
             />
-            <Route path="/" element={<Navigate to={user ? `/${user.role.toLowerCase()}` : '/login'} />} />
+            <Route path="/" element={<Navigate to={user ? `/${user.role.toLowerCase().replace('_', '-')}` : '/login'} />} />
         </Routes>
     );
 };

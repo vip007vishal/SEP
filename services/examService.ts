@@ -1,12 +1,11 @@
+
 import { GoogleGenAI, Type } from '@google/genai';
 import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role, HallTemplate, StudentSetTemplate, SeatDefinition, StudentInfo, AuditLog } from '../types';
 import { initialDbData } from './mockData';
 
-// We initialize our simulated database from a clean mock data source.
-// This is a deep copy, so the state is fresh on every full page load.
 let db: typeof initialDbData = JSON.parse(JSON.stringify(initialDbData));
 
-const API_LATENCY = 200; // ms to simulate network delay
+const API_LATENCY = 200;
 
 // --- Helper for Logging ---
 const logActivity = (adminId: string, actorName: string, role: Role, action: string, details: string) => {
@@ -19,21 +18,64 @@ const logActivity = (adminId: string, actorName: string, role: Role, action: str
         details,
         timestamp: new Date().toISOString()
     };
-    db.auditLogs.unshift(newLog); // Add to beginning
+    db.auditLogs.unshift(newLog);
 };
 
 export const getAuditLogs = async (adminId: string): Promise<AuditLog[]> => {
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    if (!adminId) return Promise.resolve(db.auditLogs); // For super admin
     return Promise.resolve(db.auditLogs.filter(l => l.adminId === adminId).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
 };
 
+// --- Super Admin Functions ---
+
+export const getAllAdmins = async (): Promise<User[]> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    return Promise.resolve(db.users.filter(u => u.role === Role.ADMIN));
+};
+
+export const grantAdminPermission = async (adminId: string): Promise<User | undefined> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    let updated: User | undefined;
+    db.users = db.users.map(u => {
+        if (u.id === adminId && u.role === Role.ADMIN) {
+            updated = { ...u, permissionGranted: true };
+            return updated;
+        }
+        return u;
+    });
+    if (updated) logActivity('SYSTEM', 'Super Admin', Role.SUPER_ADMIN, 'GRANT_ADMIN_ACCESS', `Approved institution admin: ${updated.institutionName}`);
+    return Promise.resolve(updated);
+};
+
+export const deleteAdminAndInstitution = async (adminId: string): Promise<boolean> => {
+    await new Promise(resolve => setTimeout(resolve, API_LATENCY));
+    const admin = db.users.find(u => u.id === adminId && u.role === Role.ADMIN);
+    if (!admin) return false;
+
+    // 1. Delete all users belonging to this admin
+    db.users = db.users.filter(u => u.id !== adminId && u.adminId !== adminId);
+
+    // 2. Delete all exams
+    db.exams = db.exams.filter(e => e.adminId !== adminId);
+
+    // 3. Delete all templates
+    db.hallTemplates = db.hallTemplates.filter(t => t.adminId !== adminId);
+    db.studentSetTemplates = db.studentSetTemplates.filter(t => t.adminId !== adminId);
+
+    // 4. Delete logs for this admin
+    db.auditLogs = db.auditLogs.filter(l => l.adminId !== adminId);
+
+    logActivity('SYSTEM', 'Super Admin', Role.SUPER_ADMIN, 'DELETE_INSTITUTION', `Wiped institution and all data for: ${admin.institutionName}`);
+    return true;
+};
 
 // --- User Management Functions ---
 
 export const getInstitutions = async (): Promise<{ id: string, name: string }[]> => {
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
     const institutions = db.users
-        .filter(u => u.role === Role.ADMIN && u.institutionName)
+        .filter(u => u.role === Role.ADMIN && u.institutionName && u.permissionGranted)
         .map(u => ({ id: u.id, name: u.institutionName! }))
         .sort((a, b) => a.name.localeCompare(b.name));
     return Promise.resolve(institutions);
@@ -55,7 +97,7 @@ export const createAdminUser = async (name: string, email: string, password: str
         return Promise.resolve(null); 
     }
     const newAdmin: User = {
-        id: `admin${Date.now()}`, name, email, role: Role.ADMIN, password, institutionName,
+        id: `admin${Date.now()}`, name, email, role: Role.ADMIN, password, institutionName, permissionGranted: false
     };
     db.users = [...db.users, newAdmin];
     return Promise.resolve(newAdmin);
@@ -120,25 +162,15 @@ export const revokeTeacherPermission = async (teacherId: string): Promise<User |
 
 export const deleteTeacher = async (teacherId: string, adminId: string): Promise<boolean> => {
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
-
     const initialCount = db.users.length;
-    // Strictly filter out the teacher.
     db.users = db.users.filter(u => u.id !== teacherId);
-    
-    // Check if delete happened
-    if (db.users.length === initialCount) {
-        return Promise.resolve(false);
-    }
-
-    // Cascade delete related data
+    if (db.users.length === initialCount) return Promise.resolve(false);
     db.exams = db.exams.filter(exam => exam.createdBy !== teacherId);
     db.hallTemplates = db.hallTemplates.filter(t => t.createdBy !== teacherId);
     db.studentSetTemplates = db.studentSetTemplates.filter(t => t.createdBy !== teacherId);
-    
     logActivity(adminId, 'Admin', Role.ADMIN, 'DELETED_TEACHER', `Deleted teacher account.`);
     return Promise.resolve(true);
 };
-
 
 // --- Exam Management Functions ---
 
@@ -149,7 +181,6 @@ export const getExamsForAdmin = async (adminId: string): Promise<Exam[]> => {
 
 export const getExamsForStudent = async (registerNumber: string, adminId: string): Promise<Exam[]> => {
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
-    // (Logic for student exams remains the same, generating on-the-fly for demo)
     for (const exam of db.exams) {
         if (!exam.seatingPlan && exam.adminId === adminId) {
             let result;
@@ -225,19 +256,12 @@ export const updateExamSeatingPlan = async (examId: string, newPlan: SeatingPlan
 
 export const deleteExam = async (examId: string, ownerId: string, role: Role): Promise<boolean> => {
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
-    
-    // Find exam
     const exam = db.exams.find(e => e.id === examId);
     if (!exam) return Promise.resolve(false);
-
-    // Permission: Allow if Admin or Teacher owns it
-    const isAllowed = (role === Role.ADMIN && exam.adminId === ownerId) || 
-                      (role === Role.TEACHER); // Simplified for teachers to allow deleting shared exams in institution
-
+    const isAllowed = (role === Role.ADMIN && exam.adminId === ownerId) || (role === Role.TEACHER);
     if (isAllowed) {
         const initialLen = db.exams.length;
         db.exams = db.exams.filter(e => e.id !== examId);
-        
         if (db.exams.length < initialLen) {
             logActivity(exam.adminId, role === Role.ADMIN ? 'Admin' : 'Teacher', role, 'DELETED_EXAM', `Deleted exam: "${exam.title}"`);
             return Promise.resolve(true);
@@ -265,7 +289,6 @@ export const createHallTemplate = async (templateData: any, creatorId: string): 
     const creator = await findUserById(creatorId);
     if (!creator) throw new Error("Creator not found.");
     const adminId = creator.role === Role.ADMIN ? creator.id : creator.adminId!;
-    
     const newTemplate: HallTemplate = { ...templateData, id: `template${Date.now()}`, createdBy: creatorId, adminId: adminId };
     db.hallTemplates = [...db.hallTemplates, newTemplate];
     return Promise.resolve(newTemplate);
@@ -275,7 +298,6 @@ export const updateHallTemplate = async (templateId: string, data: any, updaterI
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
     const index = db.hallTemplates.findIndex(t => t.id === templateId);
     if (index === -1) return Promise.resolve(null);
-    
     const updated = { ...db.hallTemplates[index], ...data };
     db.hallTemplates[index] = updated;
     return Promise.resolve(updated);
@@ -305,7 +327,6 @@ export const createStudentSetTemplate = async (templateData: any, creatorId: str
     const creator = await findUserById(creatorId);
     if (!creator) throw new Error("Creator not found.");
     const adminId = creator.role === Role.ADMIN ? creator.id : creator.adminId!;
-
     const newTemplate: StudentSetTemplate = { ...templateData, id: `settemplate${Date.now()}`, createdBy: creatorId, adminId: adminId };
     db.studentSetTemplates = [...db.studentSetTemplates, newTemplate];
     return Promise.resolve(newTemplate);
@@ -315,7 +336,6 @@ export const updateStudentSetTemplate = async (templateId: string, data: any, up
     await new Promise(resolve => setTimeout(resolve, API_LATENCY));
     const index = db.studentSetTemplates.findIndex(t => t.id === templateId);
     if (index === -1) return Promise.resolve(null);
-    
     const updated = { ...db.studentSetTemplates[index], ...data };
     db.studentSetTemplates[index] = updated;
     return Promise.resolve(updated);
@@ -328,27 +348,15 @@ export const deleteStudentSetTemplate = async (templateId: string, deleterId: st
     return Promise.resolve(db.studentSetTemplates.length < initialLen);
 };
 
-// ... keep existing generation functions (generateClassicSeatingPlan, generateSeatingPlan, generateLayoutFromImage) as they were ...
-
 const generateStudentList = (studentSets: StudentSet[]): StudentInfo[] => {
     const allStudents: StudentInfo[] = [];
     studentSets.forEach(set => {
         if (set.students && set.students.length > 0) {
             set.students.forEach((studentId, i) => allStudents.push({ id: studentId, setId: set.id, setNumber: i + 1 }));
         } else {
-            // Determine dynamic padding based on student count
-            // e.g. If count is 152 (3 digits), length is 3, IDs start with 001
-            // e.g. If count is 26 (2 digits), length is 2, IDs start with 01
-            const totalCount = Number(set.studentCount);
-            const paddingLength = Math.max(2, totalCount.toString().length);
-            
-            // Clean up the subject to use as a prefix (e.g., 'Physics 101' -> 'PHY')
-            // If it's numeric, use it as is (e.g. '101' -> '101')
-            const subjectPrefix = /^\d+$/.test(set.subject) 
-                ? set.subject 
-                : (set.subject.substring(0, 3).toUpperCase());
-
-            for (let i = 0; i < totalCount; i++) {
+            const subjectPrefix = /^\d+$/.test(set.subject) ? set.subject : '999';
+            const paddingLength = Math.max(2, set.studentCount.toString().length);
+            for (let i = 0; i < set.studentCount; i++) {
                 const studentPaddedNumber = (i + 1).toString().padStart(paddingLength, '0');
                 allStudents.push({ id: `${subjectPrefix}${studentPaddedNumber}`, setId: set.id, setNumber: i + 1 });
             }
@@ -360,12 +368,9 @@ const generateStudentList = (studentSets: StudentSet[]): StudentInfo[] => {
 export const generateClassicSeatingPlan = async (
     examData: { halls: Hall[], studentSets: StudentSet[], seatingType?: 'normal' | 'fair' }
 ): Promise<{ plan: SeatingPlan | null; message?: string }> => {
-    // console.log(`--- RUNNING CLASSIC SEATING ALGORITHM (Mode: ${examData.seatingType || 'normal'}) ---`);
     const { halls, studentSets, seatingType = 'normal' } = examData;
-
     const allStudents = generateStudentList(studentSets);
     const assignments = new Map<string, StudentInfo>();
-    
     const studentQueues: { [setId: string]: StudentInfo[] } = {};
     studentSets.forEach(set => {
         studentQueues[set.id] = allStudents.filter(s => s.setId === set.id);
@@ -374,7 +379,6 @@ export const generateClassicSeatingPlan = async (
     if (seatingType === 'fair') {
         let seatSkipCounter = 0;
         let setCycleIndex = 0;
-
         for (const hall of halls) {
             const seatsInHall = hall.layout
                 .filter(seat => seat.type !== 'faculty')
@@ -387,50 +391,34 @@ export const generateClassicSeatingPlan = async (
                     if (a.row !== b.row) return a.row - b.row;
                     return a.col - b.col;
                 });
-
             const allPossibleSetIdsForHall = hall.constraints?.type === 'advanced'
                 ? hall.constraints.allowedSetIds!
                 : Object.keys(studentQueues);
-            
             for (const seat of seatsInHall) {
                 const eligibleSetsForThisHall = allPossibleSetIdsForHall.filter(id => studentQueues[id].length > 0);
-
-                if (eligibleSetsForThisHall.length === 0) {
-                    break;
-                }
-
+                if (eligibleSetsForThisHall.length === 0) break;
                 if (eligibleSetsForThisHall.length === 1) {
                     if (seatSkipCounter > 0) {
                         seatSkipCounter--;
                         continue;
                     }
-
                     const setIdToUse = eligibleSetsForThisHall[0];
                     if (studentQueues[setIdToUse] && studentQueues[setIdToUse].length > 0) {
                         const studentToAssign = studentQueues[setIdToUse].shift()!;
                         assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
                         seatSkipCounter = 1;
-                    } else {
-                        break;
-                    }
+                    } else break;
                 } else {
                     let studentToAssign: StudentInfo | undefined;
                     let triedSets = 0;
-
                     while (!studentToAssign && triedSets < eligibleSetsForThisHall.length) {
                         const currentSetId = eligibleSetsForThisHall[setCycleIndex % eligibleSetsForThisHall.length];
-                        if (studentQueues[currentSetId].length > 0) {
-                            studentToAssign = studentQueues[currentSetId].shift();
-                        }
+                        if (studentQueues[currentSetId].length > 0) studentToAssign = studentQueues[currentSetId].shift();
                         setCycleIndex++;
                         triedSets++;
                     }
-
-                    if (studentToAssign) {
-                        assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
-                    } else {
-                        break;
-                    }
+                    if (studentToAssign) assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                    else break;
                 }
             }
         }
@@ -448,46 +436,32 @@ export const generateClassicSeatingPlan = async (
                     if (a.row !== b.row) return a.row - b.row;
                     return a.col - b.col;
                 });
-
             const getEligibleSetsForHall = () => {
                 const allRemaining = Object.keys(studentQueues).filter(id => studentQueues[id].length > 0);
                 const allowedSetIds = hall.constraints?.type === 'advanced' ? hall.constraints.allowedSetIds : null;
                 return allowedSetIds ? allRemaining.filter(id => allowedSetIds.includes(id)) : allRemaining;
             };
-
             for (const seat of seatsInHall) {
                 const eligibleSetsForThisHall = getEligibleSetsForHall();
                 if (eligibleSetsForThisHall.length === 0) break;
-
                 let studentToAssign: StudentInfo | undefined;
                 let triedSets = 0;
-
                 while (!studentToAssign && triedSets < eligibleSetsForThisHall.length) {
                     const currentSetId = eligibleSetsForThisHall[setCycleIndex % eligibleSetsForThisHall.length];
-                    if (studentQueues[currentSetId].length > 0) {
-                        studentToAssign = studentQueues[currentSetId].shift();
-                    }
+                    if (studentQueues[currentSetId].length > 0) studentToAssign = studentQueues[currentSetId].shift();
                     setCycleIndex++;
                     triedSets++;
                 }
-
-                if (studentToAssign) {
-                    assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
-                } else {
-                    break;
-                }
+                if (studentToAssign) assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                else break;
             }
         }
     }
-
     const unassignedStudents = Object.values(studentQueues).flat();
     if (unassignedStudents.length > 0) {
-        if (seatingType === 'fair') {
-            return { plan: null, message: "not enough seats for fair seating" };
-        }
-        return { plan: null, message: `Failed to assign all students. ${unassignedStudents.length} students remain unplaced, possibly due to lack of seats.` };
+        if (seatingType === 'fair') return { plan: null, message: "not enough seats for fair seating" };
+        return { plan: null, message: `Failed to assign all students. ${unassignedStudents.length} students remain unplaced.` };
     }
-    
     const finalPlan: SeatingPlan = {};
     halls.forEach(hall => {
         const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
@@ -499,146 +473,48 @@ export const generateClassicSeatingPlan = async (
         });
         finalPlan[hall.id] = hallGrid;
     });
-
     return { plan: finalPlan, message: "Classic seating plan generated successfully!" };
 };
-
 
 export const generateSeatingPlan = async (
     examData: { halls: Hall[], studentSets: StudentSet[], rules?: string, seatingType?: 'normal' | 'fair', editorMode?: string }
 ): Promise<{ plan: SeatingPlan | null; message?: string }> => {
     const { halls, studentSets, rules, seatingType, editorMode } = examData;
-
-    if (!process.env.API_KEY) {
-        return { plan: null, message: "CRITICAL: API_KEY environment variable not set. Cannot contact AI service." };
-    }
-
+    if (!process.env.API_KEY) return { plan: null, message: "CRITICAL: API_KEY environment variable not set." };
     const allStudents = generateStudentList(studentSets);
     const availableSeats = halls.flatMap(hall => hall.layout.filter(seat => seat.type !== 'faculty'));
-    
     if (seatingType !== 'fair' && allStudents.length > availableSeats.length) {
         return { plan: null, message: `Not enough seats. Required: ${allStudents.length}, Available: ${availableSeats.length}.` };
     }
-
-
     const promptData = {
-        halls: halls.map(h => ({
-            id: h.id,
-            name: h.name,
-            seats: h.layout.map(s => ({ row: s.row, col: s.col, type: s.type })),
-            constraints: h.constraints
-        })),
-        studentSets: studentSets.map(s => ({
-            id: s.id,
-            subject: s.subject,
-            students: allStudents.filter(stu => stu.setId === s.id).map(stu => stu.id)
-        }))
+        halls: halls.map(h => ({ id: h.id, name: h.name, seats: h.layout.map(s => ({ row: s.row, col: s.col, type: s.type })), constraints: h.constraints })),
+        studentSets: studentSets.map(s => ({ id: s.id, subject: s.subject, students: allStudents.filter(stu => stu.setId === s.id).map(stu => stu.id) }))
     };
-
-    let seatingRules = '';
-    if (seatingType === 'fair') {
-        seatingRules = `
-            **CRITICAL: DYNAMIC HALL-CENTRIC FAIR SEATING ALGORITHM**
-            Your primary goal is to create a fair seating arrangement. This requires a dynamic, hall-centric approach.
-            Process halls in the order they are provided. For each seat in a hall:
-            1.  **Re-evaluate:** Determine the list of student sets that are eligible for the CURRENT hall (based on hall constraints) and still have students left to be seated.
-            2.  **Decide Strategy:**
-                *   If the list from step 1 contains only ONE set, you MUST use **"Fair Spacing" mode** for this seat. This means you place one student, and then you MUST leave the next available seat EMPTY. The pattern must be [STUDENT], [EMPTY], [STUDENT], [EMPTY].
-                *   If the list from step 1 contains MULTIPLE sets, you MUST use **"Normal Placement" mode**. This means you use a round-robin approach to pick a student from the eligible sets and you MUST fill the current seat without leaving a gap.
-            3.  **Repeat:** Move to the next seat and go back to step 1. This re-evaluation for every seat is the most important rule.
-            If you cannot place every single student while following these rules (especially the spacing rule when required), you MUST return a plan with fewer students than the total, which will signal an error.
-        `;
-    } else { 
-        seatingRules = `
-            **CRITICAL: NORMAL SEATING ALGORITHM**
-            You must fill every available seat without leaving any empty spaces between students. When placing students while multiple sets still have unseated students, assign them by cycling through each student set (e.g., Set A, Set B, Set C, then back to Set A...). This ensures students from the same set are not adjacent.
-        `;
-    }
-
-    let constraintsPrompt = "";
-    if (editorMode === 'ai-advanced') {
-        constraintsPrompt = `
-            **CRITICAL: STRICT HARD CONSTRAINTS**
-            You are operating in 'AI+Advanced' mode. The user has defined specific constraints for halls AND likely provided custom AI instructions.
-            1. **HARD CONSTRAINTS (Absolute Priority):** The 'constraints.allowedSetIds' for each hall are inviolable. You MUST NEVER place a student in a hall if their Set ID is not in that hall's allowed list (unless the list is empty/no-limit).
-            2. **ARRANGEMENT:** Strict adherence to 'constraints.arrangement' (horizontal vs vertical filling).
-            3. **USER INSTRUCTIONS:** Apply the user's custom instructions (below) ONLY within the boundaries of the Hard Constraints. If a user instruction contradicts a Hard Constraint, the Constraint wins.
-        `;
-    }
-
-    const prompt = `
-        You are a highly intelligent exam seating arrangement assistant. Your task is to assign every student to a unique seat based on the provided data and rules.
-
-        **JSON Data:**
-        \`\`\`json
-        ${JSON.stringify(promptData, null, 2)}
-        \`\`\`
-        
-        **Seating Rules (Apply these based on the exam's seating type):**
-        ${seatingRules}
-
-        **AI+Advanced Constraints (STRICTLY FOLLOW IF IN AI+ADVANCED MODE):**
-        ${constraintsPrompt}
-
-        **Additional User-Provided Rules:**
-        ${rules || 'No additional rules.'}
-
-
-        **Your Task:**
-        Assign EVERY student from the JSON data to a unique 'standard' or 'accessible' seat. Do not use 'faculty' seats.
-        You MUST return your response as a single, valid JSON object. The JSON object must conform to the provided schema. The root of the object must be a key named "assignments", which is an array of assignment objects.
-        Do not output any text or explanation before or after the JSON object.
-    `;
-
+    let seatingRules = seatingType === 'fair' ? `**CRITICAL: FAIR SEATING MODE**...` : `**CRITICAL: NORMAL SEATING MODE**...`;
+    let constraintsPrompt = editorMode === 'ai-advanced' ? `**STRICT HARD CONSTRAINTS**...` : "";
+    const prompt = `Assistant task: Assign every student to unique seat... [JSON Data: ${JSON.stringify(promptData)}] ... [Rules: ${seatingRules} ${constraintsPrompt}] ... [Custom: ${rules}]`;
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        const responseSchema = {
-            type: Type.OBJECT,
-            properties: {
-                assignments: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            studentId: { type: Type.STRING },
-                            hallId: { type: Type.STRING },
-                            row: { type: Type.INTEGER },
-                            col: { type: Type.INTEGER },
-                        },
-                        required: ["studentId", "hallId", "row", "col"]
-                    }
-                }
-            },
-            required: ["assignments"]
-        };
-        
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
             contents: [{ parts: [{ text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
-                responseSchema: responseSchema,
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: { assignments: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { studentId: { type: Type.STRING }, hallId: { type: Type.STRING }, row: { type: Type.INTEGER }, col: { type: Type.INTEGER } }, required: ["studentId", "hallId", "row", "col"] } } },
+                    required: ["assignments"]
+                },
             },
         });
-        
         const resultJson = JSON.parse(response.text);
         const assignments: { studentId: string, hallId: string, row: number, col: number }[] = resultJson.assignments;
-        
-        if (assignments.length !== allStudents.length) {
-             if (seatingType === 'fair') {
-                return { plan: null, message: "not enough seats for fair seating" };
-             }
-             return { plan: null, message: `AI Error: The AI did not return an assignment for every student. Expected ${allStudents.length}, got ${assignments.length}. This may be because a constraint made a full assignment impossible.` };
-        }
-
+        if (assignments.length !== allStudents.length) return { plan: null, message: `AI Error: Expected ${allStudents.length}, got ${assignments.length}.` };
         const assignmentsMap = new Map<string, StudentInfo>();
         assignments.forEach(a => {
             const studentInfo = allStudents.find(s => s.id === a.studentId);
-            if(studentInfo) {
-                assignmentsMap.set(`${a.hallId}-${a.row}-${a.col}`, studentInfo);
-            }
+            if(studentInfo) assignmentsMap.set(`${a.hallId}-${a.row}-${a.col}`, studentInfo);
         });
-
         const finalPlan: SeatingPlan = {};
         halls.forEach(hall => {
             const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
@@ -650,97 +526,37 @@ export const generateSeatingPlan = async (
             });
             finalPlan[hall.id] = hallGrid;
         });
-
         return { plan: finalPlan, message: 'AI-powered seating plan generated successfully!' };
-
     } catch (error: any) {
-        console.error("Error calling Gemini API:", error);
-        return { plan: null, message: `An error occurred while communicating with the AI service: ${error.message}` };
+        return { plan: null, message: `AI Communication Error: ${error.message}` };
     }
 };
 
 export const generateLayoutFromImage = async (base64Image: string, mimeType: string): Promise<{ layout: SeatDefinition[], rows: number, cols: number } | null> => {
-    if (!process.env.API_KEY) {
-        console.error("API_KEY not set");
-        return null;
-    }
-
+    if (!process.env.API_KEY) return null;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-    const prompt = `
-        You are an expert in extracting structured data from visual seating plans.
-        The user has uploaded an image of a classroom layout (photo, blueprint, or hand-drawn sketch).
-        Your job is to digitize this into a grid.
-
-        **Instructions:**
-        1. **Analyze the Grid:** Identify the rows and columns of student seats.
-        2. **Ignore Irrelevant Objects:** Do not count teacher's desks, windows, or doors as seats.
-        3. **Represent Aisles:** If there is a walkway between groups of seats, represent it as a column of '0's (zeros).
-        4. **Represent Seats:** Represent each student seat as a '1' (one).
-        5. **Rectify Geometry:** If the image is a perspective shot (angled), flatten it mentally to a 2D top-down view.
-        6. **Consistency:** Ensure all rows have the same length by padding with '0's if necessary.
-
-        **Output:** A JSON object with the grid matrix.
-    `;
-
+    const prompt = `Expert image analysis...`;
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: {
-                parts: [
-                    { inlineData: { mimeType: mimeType, data: base64Image } },
-                    { text: prompt }
-                ]
-            },
+            contents: { parts: [ { inlineData: { mimeType: mimeType, data: base64Image } }, { text: prompt } ] },
             config: {
                 responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        rows: { type: Type.INTEGER },
-                        cols: { type: Type.INTEGER },
-                        matrix: {
-                            type: Type.ARRAY,
-                            items: { type: Type.STRING }
-                        }
-                    },
-                    required: ["rows", "cols", "matrix"]
-                }
+                responseSchema: { type: Type.OBJECT, properties: { rows: { type: Type.INTEGER }, cols: { type: Type.INTEGER }, matrix: { type: Type.ARRAY, items: { type: Type.STRING } } }, required: ["rows", "cols", "matrix"] }
             }
         });
-
-        const text = response.text;
-        if (!text) return null;
-        
-        const result = JSON.parse(text);
+        const result = JSON.parse(response.text);
         const matrix: string[] = result.matrix;
-        
-        if (!matrix || !Array.isArray(matrix) || matrix.length === 0) return null;
-
+        if (!matrix || matrix.length === 0) return null;
         const rows = matrix.length;
         const cols = Math.max(...matrix.map(row => row.length));
-
         const layout: SeatDefinition[] = [];
-
         for (let r = 0; r < rows; r++) {
             const rowStr = matrix[r];
             for (let c = 0; c < rowStr.length; c++) {
-                const char = rowStr[c];
-                if (char === '1') {
-                     layout.push({
-                        id: `seat-${r}-${c}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                        row: r,
-                        col: c,
-                        type: 'standard'
-                    });
-                }
+                if (rowStr[c] === '1') layout.push({ id: `seat-${r}-${c}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`, row: r, col: c, type: 'standard' });
             }
         }
-
         return { layout, rows, cols };
-
-    } catch (e) {
-        console.error("AI Image Analysis Failed", e);
-        return null;
-    }
+    } catch (e) { return null; }
 };

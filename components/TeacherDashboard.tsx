@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint, User, SeatingPlan } from '../types';
@@ -12,7 +13,7 @@ import {
     createHallTemplate,
     updateHallTemplate,
     deleteHallTemplate,
-    getStudentSetTemplatesForTeacher,
+    getStudentSetTemplatesForTeacher, 
     createStudentSetTemplate,
     updateStudentSetTemplate,
     deleteStudentSetTemplate,
@@ -566,6 +567,7 @@ const TeacherDashboard: React.FC = () => {
         setActiveExam(prev => prev ? { ...prev, studentSets: updatedSets } : null);
     };
 
+    // Fix Reference error by introducing currentSets before its usage
     const handleExcelFileChange = (e: React.ChangeEvent<HTMLInputElement>, indexToReplace: number) => {
         if (!e.target.files || e.target.files.length === 0) return;
     
@@ -609,15 +611,16 @@ const TeacherDashboard: React.FC = () => {
                         const currentSets = [...prev.studentSets];
                         // Replace the placeholder at the specified index with the new set.
                         currentSets.splice(indexToReplace, 1, newStudentSet);
+                        
+                        // Update seat dimensions based on the new register numbers
+                        const { width, height, fontSize } = getSeatSizeFromRegisterNumbers(
+                            currentSets as StudentSet[]
+                        );
+                        setSeatDimensions({ width, height, fontSize });
+
                         return { ...prev, studentSets: currentSets };
                     });
                     setFormError('');
-                    
-                    // Update seat dimensions based on the new register numbers
-                    const { width, height, fontSize } = getSeatSizeFromRegisterNumbers(
-                        [...currentSets, newStudentSet] as StudentSet[]
-                    );
-                    setSeatDimensions({ width, height, fontSize });
                 } else {
                     setFormError("No student register numbers found in the Excel sheet. The sheet appears to be empty.");
                 }
@@ -990,26 +993,47 @@ const TeacherDashboard: React.FC = () => {
         const hallPlan = activeExam.seatingPlan[hall.id];
         if (!hallPlan) return;
 
+        const includeSeatName = window.confirm("Do you want to include seat names (e.g., r1-c1) in the export?");
         const wb = XLSX.utils.book_new();
 
         const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
-        const headers = ['']; // For Row labels column
-        for (let c = 0; c < maxCols; c++) {
-            headers.push(`Col ${c + 1}`);
-        }
-        const data = [headers];
+        let data: any[][] = [];
 
-        for (let r = 0; r < hallPlan.length; r++) {
-            const rowData = [`Row ${r + 1}`];
+        if (includeSeatName) {
+            const headers = [''];
             for (let c = 0; c < maxCols; c++) {
-                const seat = hallPlan[r]?.[c];
-                rowData.push(seat?.student?.id || '');
+                headers.push(`Seat ${c + 1}`);
+                headers.push(`Student ${c + 1}`);
             }
-            data.push(rowData);
+            data.push(headers);
+
+            for (let r = 0; r < hallPlan.length; r++) {
+                const rowData = [`Row ${r + 1}`];
+                for (let c = 0; c < maxCols; c++) {
+                    const seat = hallPlan[r]?.[c];
+                    rowData.push(`r${r + 1}-c${c + 1}`);
+                    rowData.push(seat?.student?.id || '');
+                }
+                data.push(rowData);
+            }
+        } else {
+            const headers = [''];
+            for (let c = 0; c < maxCols; c++) {
+                headers.push(`Col ${c + 1}`);
+            }
+            data.push(headers);
+
+            for (let r = 0; r < hallPlan.length; r++) {
+                const rowData = [`Row ${r + 1}`];
+                for (let c = 0; c < maxCols; c++) {
+                    const seat = hallPlan[r]?.[c];
+                    rowData.push(seat?.student?.id || '');
+                }
+                data.push(rowData);
+            }
         }
 
         const ws = XLSX.utils.aoa_to_sheet(data);
-        // Sanitize sheet name (max 31 chars, no invalid chars)
         const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
         
@@ -1067,6 +1091,8 @@ const TeacherDashboard: React.FC = () => {
             setFormError("Seating plan not generated yet.");
             return;
         }
+
+        const includeSeatName = window.confirm("Do you want to include seat names (e.g., r1-c1) in the export?");
         setFormError('');
 
         const wb = XLSX.utils.book_new();
@@ -1076,17 +1102,38 @@ const TeacherDashboard: React.FC = () => {
             if (!hallPlan) return;
 
             const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
-            const headers = [''];
-            for (let c = 0; c < maxCols; c++) { headers.push(`Col ${c + 1}`); }
-            const data = [headers];
+            let data: any[][] = [];
 
-            for (let r = 0; r < hallPlan.length; r++) {
-                const rowData = [`Row ${r + 1}`];
+            if (includeSeatName) {
+                const headers = [''];
                 for (let c = 0; c < maxCols; c++) {
-                    const seat = hallPlan[r]?.[c];
-                    rowData.push(seat?.student?.id || '');
+                    headers.push(`Seat ${c + 1}`);
+                    headers.push(`Student ${c + 1}`);
                 }
-                data.push(rowData);
+                data.push(headers);
+
+                for (let r = 0; r < hallPlan.length; r++) {
+                    const rowData = [`Row ${r + 1}`];
+                    for (let c = 0; c < maxCols; c++) {
+                        const seat = hallPlan[r]?.[c];
+                        rowData.push(`r${r + 1}-c${c + 1}`);
+                        rowData.push(seat?.student?.id || '');
+                    }
+                    data.push(rowData);
+                }
+            } else {
+                const headers = [''];
+                for (let c = 0; c < maxCols; c++) { headers.push(`Col ${c + 1}`); }
+                data.push(headers);
+
+                for (let r = 0; r < hallPlan.length; r++) {
+                    const rowData = [`Row ${r + 1}`];
+                    for (let c = 0; c < maxCols; c++) {
+                        const seat = hallPlan[r]?.[c];
+                        rowData.push(seat?.student?.id || '');
+                    }
+                    data.push(rowData);
+                }
             }
 
             const ws = XLSX.utils.aoa_to_sheet(data);
@@ -1198,6 +1245,7 @@ const TeacherDashboard: React.FC = () => {
             return;
         }
 
+        const includeSeatName = window.confirm("Do you want to include seat names (e.g., r1-c1) in the export?");
         const wb = XLSX.utils.book_new();
 
         exam.halls.forEach(hall => {
@@ -1205,19 +1253,40 @@ const TeacherDashboard: React.FC = () => {
             if (!hallPlan) return;
 
             const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
-            const headers = ['']; // For Row labels column
-            for (let c = 0; c < maxCols; c++) {
-                headers.push(`Col ${c + 1}`);
-            }
-            const data = [headers];
+            let data: any[][] = [];
 
-            for (let r = 0; r < hallPlan.length; r++) {
-                const rowData = [`Row ${r + 1}`];
+            if (includeSeatName) {
+                const headers = [''];
                 for (let c = 0; c < maxCols; c++) {
-                    const seat = hallPlan[r]?.[c];
-                    rowData.push(seat?.student?.id || '');
+                    headers.push(`Seat ${c + 1}`);
+                    headers.push(`Student ${c + 1}`);
                 }
-                data.push(rowData);
+                data.push(headers);
+
+                for (let r = 0; r < hallPlan.length; r++) {
+                    const rowData = [`Row ${r + 1}`];
+                    for (let c = 0; c < maxCols; c++) {
+                        const seat = hallPlan[r]?.[c];
+                        rowData.push(`r${r + 1}-c${c + 1}`);
+                        rowData.push(seat?.student?.id || '');
+                    }
+                    data.push(rowData);
+                }
+            } else {
+                const headers = [''];
+                for (let c = 0; c < maxCols; c++) {
+                    headers.push(`Col ${c + 1}`);
+                }
+                data.push(headers);
+
+                for (let r = 0; r < hallPlan.length; r++) {
+                    const rowData = [`Row ${r + 1}`];
+                    for (let c = 0; c < maxCols; c++) {
+                        const seat = hallPlan[r]?.[c];
+                        rowData.push(seat?.student?.id || '');
+                    }
+                    data.push(rowData);
+                }
             }
 
             const ws = XLSX.utils.aoa_to_sheet(data);
@@ -1484,8 +1553,6 @@ const TeacherDashboard: React.FC = () => {
                                 ← Back to Dashboard
                             </Button>
                         </div>
-
-                        
 
                         <div className="space-y-8">
                             <Card className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
@@ -2322,7 +2389,6 @@ const TeacherDashboard: React.FC = () => {
                                     </div>
                                 </Card>
                                 
-                                {/* UPDATED SECTION: Removed fixed height and scroll */}
                                 <div className="space-y-8">
                                     {activeExam.halls.map(hall => {
                                         const parsedHall: Hall = {
@@ -2822,7 +2888,7 @@ const TeacherDashboard: React.FC = () => {
                                 <div className="p-3 bg-indigo-100 dark:bg-indigo-900/20 rounded-lg">
                                     <DocumentIcon className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
                                 </div>
-                                <div>
+                                <div className="flex flex-col">
                                     <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-200">My Exam Schedules</h2>
                                     <p className="text-sm text-gray-500 dark:text-gray-400">Manage and monitor all your exam configurations</p>
                                 </div>

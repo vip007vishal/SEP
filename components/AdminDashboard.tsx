@@ -206,6 +206,7 @@ const AdminDashboard: React.FC = () => {
             return;
         }
 
+        const includeSeatName = window.confirm("Do you want to include seat names (e.g., r1-c1) in the export?");
         const wb = XLSX.utils.book_new();
 
         exam.halls.forEach(hall => {
@@ -213,23 +214,44 @@ const AdminDashboard: React.FC = () => {
             if (!hallPlan) return;
 
             const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
-            const headers = ['']; // For Row labels column
-            for (let c = 0; c < maxCols; c++) {
-                headers.push(`Col ${c + 1}`);
-            }
-            const data = [headers];
+            let data: any[][] = [];
 
-            for (let r = 0; r < hallPlan.length; r++) {
-                const rowData = [`Row ${r + 1}`];
+            if (includeSeatName) {
+                // Header row
+                const headers = [''];
                 for (let c = 0; c < maxCols; c++) {
-                    const seat = hallPlan[r]?.[c];
-                    rowData.push(seat?.student?.id || '');
+                    headers.push(`Seat ${c + 1}`);
+                    headers.push(`Student ${c + 1}`);
                 }
-                data.push(rowData);
+                data.push(headers);
+
+                for (let r = 0; r < hallPlan.length; r++) {
+                    const rowData = [`Row ${r + 1}`];
+                    for (let c = 0; c < maxCols; c++) {
+                        const seat = hallPlan[r]?.[c];
+                        rowData.push(`r${r + 1}-c${c + 1}`);
+                        rowData.push(seat?.student?.id || '');
+                    }
+                    data.push(rowData);
+                }
+            } else {
+                const headers = [''];
+                for (let c = 0; c < maxCols; c++) {
+                    headers.push(`Col ${c + 1}`);
+                }
+                data.push(headers);
+
+                for (let r = 0; r < hallPlan.length; r++) {
+                    const rowData = [`Row ${r + 1}`];
+                    for (let c = 0; c < maxCols; c++) {
+                        const seat = hallPlan[r]?.[c];
+                        rowData.push(seat?.student?.id || '');
+                    }
+                    data.push(rowData);
+                }
             }
 
             const ws = XLSX.utils.aoa_to_sheet(data);
-            // Sanitize sheet name (max 31 chars, no invalid chars)
             const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
         });
@@ -247,26 +269,47 @@ const AdminDashboard: React.FC = () => {
         const hallPlan = selectedExam.seatingPlan[hall.id];
         if (!hallPlan) return;
 
+        const includeSeatName = window.confirm("Do you want to include seat names (e.g., r1-c1) in the export?");
         const wb = XLSX.utils.book_new();
 
         const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
-        const headers = ['']; // For Row labels column
-        for (let c = 0; c < maxCols; c++) {
-            headers.push(`Col ${c + 1}`);
-        }
-        const data = [headers];
+        let data: any[][] = [];
 
-        for (let r = 0; r < hallPlan.length; r++) {
-            const rowData = [`Row ${r + 1}`];
+        if (includeSeatName) {
+            const headers = [''];
             for (let c = 0; c < maxCols; c++) {
-                 const seat = hallPlan[r]?.[c];
-                rowData.push(seat?.student?.id || '');
+                headers.push(`Seat ${c + 1}`);
+                headers.push(`Student ${c + 1}`);
             }
-            data.push(rowData);
+            data.push(headers);
+
+            for (let r = 0; r < hallPlan.length; r++) {
+                const rowData = [`Row ${r + 1}`];
+                for (let c = 0; c < maxCols; c++) {
+                    const seat = hallPlan[r]?.[c];
+                    rowData.push(`r${r + 1}-c${c + 1}`);
+                    rowData.push(seat?.student?.id || '');
+                }
+                data.push(rowData);
+            }
+        } else {
+            const headers = [''];
+            for (let c = 0; c < maxCols; c++) {
+                headers.push(`Col ${c + 1}`);
+            }
+            data.push(headers);
+
+            for (let r = 0; r < hallPlan.length; r++) {
+                const rowData = [`Row ${r + 1}`];
+                for (let c = 0; c < maxCols; c++) {
+                    const seat = hallPlan[r]?.[c];
+                    rowData.push(seat?.student?.id || '');
+                }
+                data.push(rowData);
+            }
         }
 
         const ws = XLSX.utils.aoa_to_sheet(data);
-        // Sanitize sheet name (max 31 chars, no invalid chars)
         const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
         

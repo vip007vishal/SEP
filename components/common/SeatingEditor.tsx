@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { SeatingPlan, Seat, StudentSet, StudentInfo, Hall } from '../../types';
 import { SET_COLORS } from '../../constants';
@@ -11,7 +10,6 @@ interface SeatingEditorProps {
     initialPlan: SeatingPlan;
     halls: Hall[];
     studentSets: StudentSet[];
-    // Add seatDimensions for consistent grid scaling
     seatDimensions?: { width: number; height: number; fontSize: number };
 }
 
@@ -54,7 +52,7 @@ const UndoIcon = () => (
 const RedoIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
         <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-    </svg>
+</svg>
 );
 
 const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, initialPlan, halls, studentSets, seatDimensions }) => {
@@ -111,7 +109,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
         const newHistory = history.slice(0, historyIndex + 1);
         newHistory.push(snapshot);
         
-        // Limit history size to prevent memory issues (optional, e.g., 50 steps)
+        // Limit history size to prevent memory issues
         if (newHistory.length > 50) newHistory.shift();
 
         setHistory(newHistory);
@@ -171,7 +169,6 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
     const handleSeatClick = (e: React.MouseEvent, hallId: string, row: number, col: number, student?: StudentInfo) => {
         e.stopPropagation();
         if (!student) {
-             // Clicking empty space clears selection unless holding shift
              if (!e.shiftKey) setSelectedSeatKeys(new Set());
              return;
         }
@@ -194,7 +191,6 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
     const handleDragStart = (e: React.DragEvent, hallId: string, row: number, col: number, student: StudentInfo) => {
         const key = getSeatKey(hallId, row, col);
         
-        // If dragging a seat that isn't selected, clear previous and select this one
         if (!selectedSeatKeys.has(key)) {
             setSelectedSeatKeys(new Set([key]));
         }
@@ -202,14 +198,13 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
         setDraggedSeat({ hallId, row, col, student });
         setDraggedFromHolding(null);
         e.dataTransfer.effectAllowed = 'move';
-        // Add a class to body to indicate dragging
         document.body.classList.add('cursor-grabbing');
     };
 
     const handleDragStartHolding = (e: React.DragEvent, student: StudentInfo) => {
         setDraggedFromHolding(student);
         setDraggedSeat(null);
-        setSelectedSeatKeys(new Set()); // Clear grid selection when dragging from holding
+        setSelectedSeatKeys(new Set()); 
         e.dataTransfer.effectAllowed = 'move';
     };
 
@@ -228,12 +223,11 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
         const currentHallPlan = plan[targetHallId];
         if (!currentHallPlan) return;
         const targetSeat = currentHallPlan[targetRow]?.[targetCol];
-        if (!targetSeat) return; // Invalid target
+        if (!targetSeat) return; 
 
         const newPlan = { ...plan };
         let newHoldingStudents = [...holdingStudents];
 
-        // --- Logic 1: Dragging from GRID (Bulk Move/Swap) ---
         if (draggedSeat) {
             const rowOffset = targetRow - draggedSeat.row;
             const colOffset = targetCol - draggedSeat.col;
@@ -298,10 +292,8 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
             
             addToHistory(newPlan, newHoldingStudents);
         } 
-        // --- Logic 2: Dragging from HOLDING ---
         else if (draggedFromHolding) {
             if (targetSeat.student) {
-                // Swap
                 newHoldingStudents = newHoldingStudents.filter(s => s.id !== draggedFromHolding.id);
                 newHoldingStudents.push(targetSeat.student!);
                 targetSeat.student = draggedFromHolding;
@@ -367,7 +359,6 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
     const handleSaveClick = () => {
         if (holdingStudents.length > 0) {
             setErrorMessage(`Cannot save changes! There are ${holdingStudents.length} students currently unseated in the holding area.`);
-            // Auto dismiss after 5 seconds
             setTimeout(() => setErrorMessage(null), 5000);
             return;
         }
@@ -396,14 +387,16 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
 
     if (!isOpen) return null;
 
-    // Use dynamic dimensions for the grid
-    const dims = seatDimensions || { width: 112, height: 64, fontSize: 12 };
+    // Determine seat styling based on provided or default dimensions
+    const seatW = seatDimensions?.width ? `${seatDimensions.width / 16}rem` : '7rem';
+    const seatH = seatDimensions?.height ? `${seatDimensions.height / 16}rem` : '4rem';
+    const seatFontSize = seatDimensions?.fontSize ? `${seatDimensions.fontSize}px` : '0.75rem';
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex justify-center items-center z-50 p-4" onClick={onClose}>
             <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full h-full max-w-[95vw] max-h-[95vh] flex flex-col overflow-hidden relative" onClick={e => e.stopPropagation()}>
                 
-                {/* Modern Header */}
+                {/* Header */}
                 <header className="bg-white dark:bg-slate-900 border-b dark:border-slate-800 flex flex-col sm:flex-row justify-between items-center px-6 py-3 gap-4 shadow-sm z-20">
                     <div className="flex items-center gap-4">
                         <div className="p-2 bg-violet-100 dark:bg-violet-900/30 rounded-lg">
@@ -419,8 +412,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                         </div>
                     </div>
 
-                    {/* Hall Tabs (Segmented Control style) */}
-                    <div className="flex overflow-x-auto max-w-lg p-1 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                    <div className="flex overflow-x-auto max-w-lg p-1 bg-slate-100 dark:bg-slate-800 rounded-lg no-scrollbar">
                         {halls.map(hall => (
                             <button
                                 key={hall.id}
@@ -463,8 +455,8 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                 </header>
 
                 <div className="flex-grow flex overflow-hidden">
-                    {/* Left Sidebar: Holding Bay */}
-                    <aside className="w-80 flex-shrink-0 flex flex-col bg-slate-50 dark:bg-slate-800/50 border-r dark:border-slate-800">
+                    {/* Holding Bay */}
+                    <aside className="w-80 flex-shrink-0 flex flex-col bg-slate-50 dark:bg-slate-800/50 border-r dark:border-slate-800 shadow-inner">
                         <div className="p-4 flex-grow flex flex-col overflow-hidden">
                             <div className="flex justify-between items-center mb-2">
                                 <h3 className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
@@ -530,17 +522,17 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                         </div>
                     </aside>
 
-                    {/* Main Canvas */}
+                    {/* Main Canvas with Enhanced Scrolling and Spacing */}
                     <main 
-                        className="flex-grow flex flex-col bg-slate-100 dark:bg-[#0B1120] relative"
+                        className="flex-grow flex flex-col bg-slate-100 dark:bg-[#0B1120] relative overflow-auto custom-scrollbar"
                         style={{
                             backgroundImage: 'radial-gradient(#CBD5E1 1px, transparent 1px)',
                             backgroundSize: '20px 20px',
                         }}
                         onClick={handleBackgroundClick}
                     >
-                        {/* Grid Toolbar */}
-                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white dark:bg-slate-800 shadow-lg rounded-full px-4 py-2 flex items-center gap-3 z-10 border dark:border-slate-700">
+                        {/* Grid Toolbar - Sticky to the top viewport */}
+                        <div className="sticky top-4 left-1/2 transform -translate-x-1/2 bg-white/90 dark:bg-slate-800/90 backdrop-blur shadow-lg rounded-full px-4 py-2 flex items-center gap-3 z-30 border dark:border-slate-700 w-max mx-auto">
                              <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mr-2">Selection: {selectedSeatKeys.size}</div>
                              <div className="h-4 w-px bg-slate-300 dark:bg-slate-600"></div>
                              <button onClick={handleSelectAllInHall} className="text-xs font-medium hover:text-violet-600 dark:hover:text-violet-400 transition-colors">Select All</button>
@@ -548,29 +540,33 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                              <button onClick={() => setSelectedSeatKeys(new Set())} className="text-xs font-medium hover:text-red-600 dark:hover:text-red-400 transition-colors">Clear</button>
                         </div>
 
-                        {/* Grid Content */}
-                        <div className="flex-grow overflow-auto p-12 flex justify-center items-start">
+                        {/* Grid Wrapper - Generous spacing on all sides to prevent halls from sticking to edges */}
+                        {/* Increased padding-left (pl-40) for space from holding area */}
+                        {/* Increased padding-right (pr-40) for space on right side */}
+                        {/* Increased padding-bottom (pb-40) for space at bottom */}
+                        <div className="flex-grow flex justify-center items-start min-h-full min-w-full pt-20 pb-40 pl-40 pr-40">
                             {selectedHallId && plan[selectedHallId] && (() => {
                                 const currentGrid = plan[selectedHallId];
                                 const maxCols = currentGrid.reduce((max, row) => Math.max(max, row.length), 0);
 
                                 return (
                                     <div 
-                                        className="grid gap-4 p-8 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border dark:border-slate-700"
+                                        className="relative grid gap-4 p-12 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border dark:border-slate-700 w-max"
                                         style={{ 
-                                            // Apply dynamic seat width
-                                            gridTemplateColumns: `repeat(${maxCols}, minmax(${dims.width / 16}rem, 1fr))` 
+                                            gridTemplateColumns: `repeat(${maxCols}, minmax(${seatW}, 1fr))` 
                                         }}
                                         onClick={(e) => e.stopPropagation()}
                                     >
+                                        {/* Visual boundary indicator to show the hall is centered with space around */}
+                                        <div className="absolute -inset-8 border-2 border-transparent pointer-events-none rounded-3xl"></div>
+                                        
                                         {currentGrid.map((row, rIndex) => (
                                             row.map((seat, cIndex) => {
-                                                if (!seat) return <div key={`${rIndex}-${cIndex}`} className="rounded-lg opacity-50 bg-slate-50 dark:bg-slate-900/50" style={{ width: `${dims.width / 16}rem`, height: `${dims.height / 16}rem` }}></div>;
+                                                if (!seat) return <div key={`${rIndex}-${cIndex}`} style={{ height: seatH, width: seatW }} className="bg-slate-50 dark:bg-slate-900/50 rounded-lg opacity-50"></div>;
 
                                                 const isOccupied = !!seat.student;
                                                 const bgColor = isOccupied ? getSetColor(seat.student!.setId) : 'bg-slate-100 dark:bg-slate-700';
                                                 
-                                                // Check selection
                                                 const seatKey = getSeatKey(selectedHallId, rIndex, cIndex);
                                                 const isSelected = selectedSeatKeys.has(seatKey);
 
@@ -583,10 +579,8 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                                                         onDragStart={(e) => isOccupied && handleDragStart(e, selectedHallId, rIndex, cIndex, seat.student!)}
                                                         onDragEnd={handleDragEnd}
                                                         onClick={(e) => handleSeatClick(e, selectedHallId, rIndex, cIndex, seat.student)}
-                                                        // Apply dynamic seat height and font-size
-                                                        style={{ height: `${dims.height / 16}rem`, fontSize: `${dims.fontSize / 16}rem` }}
                                                         className={`
-                                                            w-full rounded-xl flex flex-col items-center justify-center font-bold
+                                                            rounded-xl flex flex-col items-center justify-center font-bold
                                                             border transition-all duration-200 relative px-2
                                                             ${bgColor}
                                                             ${isOccupied 
@@ -596,6 +590,11 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                                                             ${seat.type === 'accessible' ? 'ring-2 ring-blue-400' : ''}
                                                             ${isSelected ? 'ring-4 ring-indigo-500 z-10 shadow-xl scale-105' : ''}
                                                         `}
+                                                        style={{ 
+                                                            height: seatH, 
+                                                            width: seatW,
+                                                            fontSize: seatFontSize
+                                                        }}
                                                         title={`R${rIndex+1} C${cIndex+1} ${seat.student ? `(${seat.student.id})` : 'Empty'}`}
                                                     >
                                                         {isSelected && (
@@ -605,14 +604,14 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                                                         )}
                                                         
                                                         {isOccupied ? (
-                                                            <span className="font-bold break-all text-center">{seat.student?.id}</span>
+                                                            <span className="break-all text-center leading-tight">{seat.student?.id}</span>
                                                         ) : (
                                                             <span className="text-[10px] font-mono opacity-50">{rIndex+1}-{cIndex+1}</span>
                                                         )}
                                                     </div>
                                                 );
                                             }).concat(Array.from({ length: maxCols - row.length }).map((_, i) => (
-                                                <div key={`pad-${rIndex}-${i}`} style={{ width: `${dims.width / 16}rem`, height: `${dims.height / 16}rem` }}></div>
+                                                <div key={`pad-${rIndex}-${i}`} style={{ height: seatH, width: seatW }}></div>
                                             )))
                                         ))}
                                     </div>
@@ -622,7 +621,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                     </main>
                 </div>
 
-                {/* Error Toast Notification */}
+                {/* Error Toast */}
                 {errorMessage && (
                     <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 z-50 animate-bounce-in">
                         <div className="bg-red-600 text-white px-6 py-4 rounded-lg shadow-2xl flex items-center gap-4 border border-red-500 max-w-md">

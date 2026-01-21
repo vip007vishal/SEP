@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
@@ -31,6 +32,7 @@ const Header: React.FC = () => {
 
     const getRoleName = (role: Role) => {
         switch(role) {
+            case Role.SUPER_ADMIN: return "Super Admin";
             case Role.ADMIN: return "Admin";
             case Role.TEACHER: return "Teacher";
             case Role.STUDENT: return "Student";
@@ -54,7 +56,7 @@ const Header: React.FC = () => {
                     <div className="flex items-center gap-4">
                         {user && (
                             <>
-                                {(user.role === Role.ADMIN || user.role === Role.TEACHER) && (
+                                {(user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN || user.role === Role.TEACHER) && (
                                     <button
                                         onClick={() => setIsProfileModalOpen(true)}
                                         className="hidden sm:flex items-center text-slate-600 hover:text-violet-700 dark:text-slate-300 dark:hover:text-violet-400 transition"
@@ -78,7 +80,7 @@ const Header: React.FC = () => {
                     </div>
                 </div>
             </header>
-            {user && (user.role === Role.ADMIN || user.role === Role.TEACHER) && (
+            {user && (user.role === Role.SUPER_ADMIN || user.role === Role.ADMIN || user.role === Role.TEACHER) && (
                 <ProfileModal 
                     user={user}
                     isOpen={isProfileModalOpen}

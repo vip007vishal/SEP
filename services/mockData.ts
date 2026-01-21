@@ -1,13 +1,12 @@
 
-
 import { User, Role, Exam, HallTemplate, StudentSetTemplate, AuditLog } from '../types';
 
-// This object simulates the data that would be stored in your PostgreSQL database on KWS.
-// By isolating it here, we create a clean separation between the data source and the service layer.
 export const initialDbData: { users: User[], exams: Exam[], hallTemplates: HallTemplate[], studentSetTemplates: StudentSetTemplate[], auditLogs: AuditLog[] } = {
     users: [
-        { id: 'admin01', name: 'Admin User', email: 'admin@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'Global Tech University' },
-        { id: 'admin02', name: 'Second Admin', email: 'admin2@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'Innovate Institute' },
+        { id: 'super01', name: 'System Super Admin', email: 'super@exam.com', role: Role.SUPER_ADMIN, password: 'password123' },
+        { id: 'admin01', name: 'Admin User', email: 'admin@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'Global Tech University', permissionGranted: true },
+        { id: 'admin02', name: 'Second Admin', email: 'admin2@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'Innovate Institute', permissionGranted: true },
+        { id: 'admin_pending', name: 'Pending Admin', email: 'pending@exam.com', role: Role.ADMIN, password: 'password123', institutionName: 'New Horizon School', permissionGranted: false },
         { id: 'teacher01', name: 'Dr. Evelyn Reed', email: 'teacher1@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123', adminId: 'admin01' },
         { id: 'teacher02', name: 'Mr. Samuel Chen', email: 'teacher2@exam.com', role: Role.TEACHER, permissionGranted: false, password: 'password123' },
         { id: 'teacher03', name: 'Ms. Anya Sharma', email: 'teacher3@exam.com', role: Role.TEACHER, permissionGranted: true, password: 'password123', adminId: 'admin01' },

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Hall, SeatingPlan, StudentSet, Seat, SeatType } from '../../types';
 import { SET_COLORS } from '../../constants';
@@ -8,8 +7,6 @@ interface SeatingPlanVisualizerProps {
     plan: SeatingPlan;
     studentSets: StudentSet[];
     highlightSeat?: { row: number, col: number };
-    // Add seatDimensions to allow dynamic scaling based on content
-    seatDimensions?: { width: number; height: number; fontSize: number };
 }
 
 const getSeatTypeStyles = (type: SeatType): { icon: React.ReactNode, baseBg: string } => {
@@ -24,7 +21,7 @@ const getSeatTypeStyles = (type: SeatType): { icon: React.ReactNode, baseBg: str
     }
 };
 
-const SeatingPlanVisualizer: React.FC<SeatingPlanVisualizerProps> = ({ hall, plan, studentSets, highlightSeat, seatDimensions }) => {
+const SeatingPlanVisualizer: React.FC<SeatingPlanVisualizerProps> = ({ hall, plan, studentSets, highlightSeat }) => {
     const hallPlan = plan[hall.id];
 
     if (!hallPlan) {
@@ -62,9 +59,6 @@ const SeatingPlanVisualizer: React.FC<SeatingPlanVisualizerProps> = ({ hall, pla
 
     const isVerticalText = direction === 'left' || direction === 'right';
 
-    // Default dimensions if none provided
-    const dimensions = seatDimensions || { width: 80, height: 60, fontSize: 14 };
-
     return (
         <div className="w-full">
             <h3 className="text-xl font-bold mb-6 text-center text-slate-700 dark:text-slate-300">{hall.name}</h3>
@@ -88,15 +82,15 @@ const SeatingPlanVisualizer: React.FC<SeatingPlanVisualizerProps> = ({ hall, pla
                     <div 
                         className="grid gap-4"
                         style={{ 
-                            // Use dynamic width from dimensions
-                            gridTemplateColumns: `repeat(${maxCols}, minmax(${dimensions.width / 16}rem, 1fr))`,
+                            // Increased min-width from 3.5rem to 5.5rem to allow long IDs to be legible
+                            gridTemplateColumns: `repeat(${maxCols}, minmax(5.5rem, 1fr))`,
                         }}
                     >
                         {hallPlan.map((row, rowIndex) => (
                             row.map((seat, colIndex) => {
                                 if (!seat) {
                                     // Empty grid cell
-                                    return <div key={`empty-${rowIndex}-${colIndex}`} style={{ height: `${dimensions.height / 16}rem` }}></div>;
+                                    return <div key={`empty-${rowIndex}-${colIndex}`} className="h-12 sm:h-14"></div>;
                                 }
 
                                 const seatStyles = getSeatTypeStyles(seat.type);
@@ -113,15 +107,15 @@ const SeatingPlanVisualizer: React.FC<SeatingPlanVisualizerProps> = ({ hall, pla
                                     <div
                                         key={`${seat.id}-${rowIndex}-${colIndex}`}
                                         title={seat.student ? `Seat: R${seat.row+1}C${seat.col+1} - Student ID: ${seat.student.id}` : `${seat.type} Seat: R${seat.row+1}C${seat.col+1}`}
-                                        // Use dynamic height and font-size
-                                        style={{ height: `${dimensions.height / 16}rem`, fontSize: `${dimensions.fontSize / 16}rem` }}
-                                        className={`w-full rounded-lg flex items-center justify-center text-center font-bold text-slate-800 dark:text-slate-900 transition-all break-all px-2 py-1 ${bgColor} ${border}`}
+                                        // Changed aspect-square to a fixed height with flexible width (h-12 to h-14)
+                                        // Increased font size to text-sm and added font-mono for better number readability
+                                        className={`w-full h-12 sm:h-14 rounded-lg flex items-center justify-center text-center text-sm font-bold text-slate-800 dark:text-slate-900 transition-all break-all px-2 py-1 ${bgColor} ${border}`}
                                     >
                                         {seatContent}
                                     </div>
                                 );
                             }).concat(Array.from({ length: maxCols - row.length }).map((_, i) => (
-                            <div key={`pad-${rowIndex}-${row.length + i}`} style={{ height: `${dimensions.height / 16}rem` }}></div>
+                            <div key={`pad-${rowIndex}-${row.length + i}`} className="h-12 sm:h-14"></div>
                             )))
                         ))}
                     </div>
