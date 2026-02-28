@@ -27,10 +27,18 @@ export interface SeatDefinition {
     type: SeatType;
 }
 
+export interface HallAllocation {
+    enabled: boolean;
+    strategy: 'linear' | 'diagonal';
+    linearDirection: 'horizontal' | 'vertical';
+}
+
 export interface HallConstraint {
     type: 'no-limit' | 'advanced';
     allowedSetIds?: string[];
+    setLimits?: { [setId: string]: number }; // Numeric limits per selected set in this hall
     arrangement?: 'horizontal' | 'vertical';
+    allocation?: HallAllocation;
 }
 
 export interface Hall {

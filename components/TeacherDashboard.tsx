@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint, User, SeatingPlan } from '../types';
+import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint, User, SeatingPlan, HallAllocation } from '../types';
 import { 
     getExamsForTeacher, 
     generateSeatingPlan,
@@ -18,7 +17,8 @@ import {
     updateStudentSetTemplate,
     deleteStudentSetTemplate,
     getTeachersForAdmin,
-    updateExamSeatingPlan
+    updateExamSeatingPlan,
+    findUserById
 } from '../services/examService';
 import Header from './common/Header';
 import Card from './common/Card';
@@ -232,6 +232,7 @@ const TeacherDashboard: React.FC = () => {
     const [hallTemplates, setHallTemplates] = useState<HallTemplate[]>([]);
     const [studentSetTemplates, setStudentSetTemplates] = useState<StudentSetTemplate[]>([]);
     const [colleagues, setColleagues] = useState<User[]>([]);
+    const [adminUser, setAdminUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [activeExam, setActiveExam] = useState<FormExam | null>(null);
     const [formError, setFormError] = useState('');
@@ -344,6 +345,13 @@ const TeacherDashboard: React.FC = () => {
              if (user?.permissionGranted) {
                 setIsLoading(true);
                 await Promise.all([fetchExams(), fetchHallTemplates(), fetchStudentSetTemplates(), fetchColleagues()]);
+                
+                // Fetch Admin to get Institution Name
+                if (user.adminId) {
+                    const admin = await findUserById(user.adminId);
+                    setAdminUser(admin || null);
+                }
+                
                 setIsLoading(false);
             } else {
                 setIsLoading(false);
@@ -490,8 +498,9 @@ const TeacherDashboard: React.FC = () => {
         const currentHall = updatedHalls[hallIndex];
         
         let newConstraints: HallConstraint = { ...(currentHall.constraints || { arrangement: 'horizontal' }), type };
-        if (type === 'advanced' && !newConstraints.allowedSetIds) {
-            newConstraints.allowedSetIds = [];
+        if (type === 'advanced') {
+            if (!newConstraints.allowedSetIds) newConstraints.allowedSetIds = [];
+            if (!newConstraints.setLimits) newConstraints.setLimits = {};
         }
 
         updatedHalls[hallIndex] = { ...currentHall, constraints: newConstraints };
@@ -512,6 +521,57 @@ const TeacherDashboard: React.FC = () => {
         };
         setActiveExam(prev => prev ? { ...prev, halls: updatedHalls } : null);
     };
+
+    const handleAllocationToggle = (hallIndex: number, enabled: boolean) => {
+        if (!activeExam) return;
+        const updatedHalls = [...activeExam.halls];
+        const currentHall = updatedHalls[hallIndex];
+        const currentConstraints = currentHall.constraints || { type: 'no-limit', arrangement: 'horizontal' };
+        
+        const newAllocation: HallAllocation = {
+            enabled,
+            strategy: currentConstraints.allocation?.strategy || 'linear',
+            linearDirection: currentConstraints.allocation?.linearDirection || 'horizontal'
+        };
+
+        updatedHalls[hallIndex] = { 
+            ...currentHall, 
+            constraints: { ...currentConstraints, allocation: newAllocation }
+        };
+        setActiveExam(prev => prev ? { ...prev, halls: updatedHalls } : null);
+    };
+
+    const handleAllocationStrategyChange = (hallIndex: number, strategy: 'linear' | 'diagonal') => {
+        if (!activeExam) return;
+        const updatedHalls = [...activeExam.halls];
+        const currentHall = updatedHalls[hallIndex];
+        if (!currentHall.constraints?.allocation) return;
+
+        updatedHalls[hallIndex] = { 
+            ...currentHall, 
+            constraints: { 
+                ...currentHall.constraints, 
+                allocation: { ...currentHall.constraints.allocation, strategy } 
+            }
+        };
+        setActiveExam(prev => prev ? { ...prev, halls: updatedHalls } : null);
+    };
+
+    const handleLinearDirectionChange = (hallIndex: number, linearDirection: 'horizontal' | 'vertical') => {
+        if (!activeExam) return;
+        const updatedHalls = [...activeExam.halls];
+        const currentHall = updatedHalls[hallIndex];
+        if (!currentHall.constraints?.allocation) return;
+
+        updatedHalls[hallIndex] = { 
+            ...currentHall, 
+            constraints: { 
+                ...currentHall.constraints, 
+                allocation: { ...currentHall.constraints.allocation, linearDirection } 
+            }
+        };
+        setActiveExam(prev => prev ? { ...prev, halls: updatedHalls } : null);
+    };
     
     const handleAllowedSetChange = (hallIndex: number, setId: string, isChecked: boolean) => {
         if (!activeExam) return;
@@ -524,9 +584,35 @@ const TeacherDashboard: React.FC = () => {
                 ? [...currentAllowed, setId]
                 : currentAllowed.filter(id => id !== setId);
             
+            // If unchecked, also remove numeric limit
+            const newSetLimits = { ...(currentHall.constraints.setLimits || {}) };
+            if (!isChecked) delete newSetLimits[setId];
+
             updatedHalls[hallIndex] = { 
                 ...currentHall, 
-                constraints: { ...currentHall.constraints, allowedSetIds: newAllowedSetIds }
+                constraints: { ...currentHall.constraints, allowedSetIds: newAllowedSetIds, setLimits: newSetLimits }
+            };
+            setActiveExam(prev => prev ? { ...prev, halls: updatedHalls } : null);
+        }
+    };
+
+    const handleSetLimitChange = (hallIndex: number, setId: string, limit: string) => {
+        if (!activeExam) return;
+        const updatedHalls = [...activeExam.halls];
+        const currentHall = updatedHalls[hallIndex];
+
+        if (currentHall.constraints?.type === 'advanced') {
+            const newSetLimits = { ...(currentHall.constraints.setLimits || {}) };
+            const numericLimit = parseInt(limit, 10);
+            if (!isNaN(numericLimit) && numericLimit >= 0) {
+                newSetLimits[setId] = numericLimit;
+            } else if (limit === '') {
+                delete newSetLimits[setId];
+            }
+
+            updatedHalls[hallIndex] = { 
+                ...currentHall, 
+                constraints: { ...currentHall.constraints, setLimits: newSetLimits }
             };
             setActiveExam(prev => prev ? { ...prev, halls: updatedHalls } : null);
         }
@@ -567,7 +653,6 @@ const TeacherDashboard: React.FC = () => {
         setActiveExam(prev => prev ? { ...prev, studentSets: updatedSets } : null);
     };
 
-    // Fix Reference error by introducing currentSets before its usage
     const handleExcelFileChange = (e: React.ChangeEvent<HTMLInputElement>, indexToReplace: number) => {
         if (!e.target.files || e.target.files.length === 0) return;
     
@@ -841,7 +926,12 @@ const TeacherDashboard: React.FC = () => {
                 if (isNaN(studentCount) || studentCount <= 0) {
                     throw new Error(`Invalid student count for set "${s.subject}". Please enter a positive number.`);
                 }
-                return { ...s, id: s.id || `set-${Date.now()}`, studentCount };
+                return { 
+                    id: s.id || `set-${Date.now()}`, 
+                    subject: s.subject,
+                    studentCount: studentCount,
+                    students: s.students
+                } as StudentSet;
             });
 
             return {
@@ -997,7 +1087,13 @@ const TeacherDashboard: React.FC = () => {
         const wb = XLSX.utils.book_new();
 
         const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
+        const totalWidth = includeSeatName ? 1 + (maxCols * 2) : 1 + maxCols;
         let data: any[][] = [];
+
+        // Header Row 1: Institute Name
+        data.push([adminUser?.institutionName || '']);
+        // Header Row 2: Hall Name
+        data.push([hall.name]);
 
         if (includeSeatName) {
             const headers = [''];
@@ -1033,7 +1129,25 @@ const TeacherDashboard: React.FC = () => {
             }
         }
 
+        // Footer: Student Sets
+        const activeSetIds = new Set<string>();
+        hallPlan.forEach(row => row.forEach(seat => {
+            if (seat?.student) activeSetIds.add(seat.student.setId);
+        }));
+        const setCodes = activeExam.studentSets
+            .filter(s => activeSetIds.has(s.id))
+            .map(s => s.subject)
+            .join(', ');
+        data.push([]); // Spacer
+        data.push([`Student Sets: ${setCodes}`]);
+
         const ws = XLSX.utils.aoa_to_sheet(data);
+        
+        // Merges
+        if (!ws['!merges']) ws['!merges'] = [];
+        ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalWidth - 1 } });
+        ws['!merges'].push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalWidth - 1 } });
+
         const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
         
@@ -1102,7 +1216,13 @@ const TeacherDashboard: React.FC = () => {
             if (!hallPlan) return;
 
             const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
+            const totalWidth = includeSeatName ? 1 + (maxCols * 2) : 1 + maxCols;
             let data: any[][] = [];
+
+            // Header Row 1: Institute Name
+            data.push([adminUser?.institutionName || '']);
+            // Header Row 2: Hall Name
+            data.push([hall.name]);
 
             if (includeSeatName) {
                 const headers = [''];
@@ -1136,7 +1256,25 @@ const TeacherDashboard: React.FC = () => {
                 }
             }
 
+            // Footer: Student Sets
+            const activeSetIds = new Set<string>();
+            hallPlan.forEach(row => row.forEach(seat => {
+                if (seat?.student) activeSetIds.add(seat.student.setId);
+            }));
+            const setCodes = activeExam.studentSets
+                .filter(s => activeSetIds.has(s.id))
+                .map(s => s.subject)
+                .join(', ');
+            data.push([]); // Spacer
+            data.push([`Student Sets: ${setCodes}`]);
+
             const ws = XLSX.utils.aoa_to_sheet(data);
+            
+            // Merges
+            if (!ws['!merges']) ws['!merges'] = [];
+            ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalWidth - 1 } });
+            ws['!merges'].push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalWidth - 1 } });
+
             const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
         });
@@ -1253,9 +1391,16 @@ const TeacherDashboard: React.FC = () => {
             if (!hallPlan) return;
 
             const maxCols = hallPlan.reduce((max, row) => Math.max(max, row.length), 0);
+            const totalWidth = includeSeatName ? 1 + (maxCols * 2) : 1 + maxCols;
             let data: any[][] = [];
 
+            // Header Row 1: Institute Name
+            data.push([adminUser?.institutionName || '']);
+            // Header Row 2: Hall Name
+            data.push([hall.name]);
+
             if (includeSeatName) {
+                // Header row
                 const headers = [''];
                 for (let c = 0; c < maxCols; c++) {
                     headers.push(`Seat ${c + 1}`);
@@ -1289,7 +1434,25 @@ const TeacherDashboard: React.FC = () => {
                 }
             }
 
+            // Footer: Student Sets
+            const activeSetIds = new Set<string>();
+            hallPlan.forEach(row => row.forEach(seat => {
+                if (seat?.student) activeSetIds.add(seat.student.setId);
+            }));
+            const setCodes = exam.studentSets
+                .filter(s => activeSetIds.has(s.id))
+                .map(s => s.subject)
+                .join(', ');
+            data.push([]); // Spacer
+            data.push([`Student Sets: ${setCodes}`]);
+
             const ws = XLSX.utils.aoa_to_sheet(data);
+            
+            // Merges
+            if (!ws['!merges']) ws['!merges'] = [];
+            ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: totalWidth - 1 } });
+            ws['!merges'].push({ s: { r: 1, c: 0 }, e: { r: 1, c: totalWidth - 1 } });
+
             const sheetName = hall.name.replace(/[*?:/\\\[\]]/g, '').substring(0, 31);
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
         });
@@ -1390,8 +1553,10 @@ const TeacherDashboard: React.FC = () => {
         const parsedStudentSetsForVisualizer: StudentSet[] = activeExam.studentSets
             .filter(set => !set.isPlaceholder)
             .map(set => ({
-                ...set,
+                id: set.id,
+                subject: set.subject,
                 studentCount: Number(set.studentCount) || 0,
+                students: set.students
             }));
 
         return (
@@ -1488,7 +1653,7 @@ const TeacherDashboard: React.FC = () => {
                                         <div key={template.id} className="flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors border border-gray-200 dark:border-gray-600">
                                             <div className="flex items-center gap-3">
                                                 <div className="p-2 bg-green-100 dark:bg-green-900/20 rounded-lg">
-                                                    <UsersIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
+                                                    <UsersIcon className="h-6 w-6 text-green-600 dark:text-green-400" />
                                                 </div>
                                                 <div>
                                                     <p className="font-semibold text-gray-800 dark:text-gray-200">{template.subject}</p>
@@ -1647,7 +1812,7 @@ const TeacherDashboard: React.FC = () => {
                                             </div>
                                             <div>
                                                 <h4 className={`font-semibold ${activeExam.editorMode === 'advanced' ? 'text-cyan-700 dark:text-cyan-300' : 'text-gray-700 dark:text-gray-300'}`}>Advanced Mode</h4>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Manual control with algorithms</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Manual control with predictable algorithms</p>
                                             </div>
                                         </div>
                                         {activeExam.editorMode === 'advanced' && (
@@ -1876,21 +2041,97 @@ const TeacherDashboard: React.FC = () => {
                                                                 </div>
                                                             </div>
 
+                                                            {/* Allocation Type Enhancement */}
+                                                            <div className="pt-4 border-t border-gray-100 dark:border-gray-700/50">
+                                                                <div className="flex items-center justify-between mb-4">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <label className="block text-sm font-bold text-gray-800 dark:text-gray-200">Allocation Type</label>
+                                                                        <span className="px-2 py-0.5 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 rounded text-[10px] font-black uppercase tracking-tighter">Optional</span>
+                                                                    </div>
+                                                                    <div 
+                                                                        onClick={() => handleAllocationToggle(index, !hall.constraints?.allocation?.enabled)}
+                                                                        className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${hall.constraints?.allocation?.enabled ? 'bg-violet-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                                                                    >
+                                                                        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-300 ${hall.constraints?.allocation?.enabled ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                                                                    </div>
+                                                                </div>
+
+                                                                {hall.constraints?.allocation?.enabled && (
+                                                                    <div className="space-y-4 animate-fadeIn">
+                                                                        <div className="flex gap-4">
+                                                                            <button 
+                                                                                type="button"
+                                                                                onClick={() => handleAllocationStrategyChange(index, 'linear')}
+                                                                                className={`flex-1 p-3 rounded-lg border-2 text-left transition-all ${hall.constraints.allocation.strategy === 'linear' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/10 shadow-sm' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300'}`}
+                                                                            >
+                                                                                <p className={`text-sm font-bold ${hall.constraints.allocation.strategy === 'linear' ? 'text-violet-700 dark:text-violet-300' : 'text-gray-700 dark:text-gray-300'}`}>Linear</p>
+                                                                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Continuous alignment in one direction</p>
+                                                                            </button>
+                                                                            <button 
+                                                                                type="button"
+                                                                                onClick={() => handleAllocationStrategyChange(index, 'diagonal')}
+                                                                                className={`flex-1 p-3 rounded-lg border-2 text-left transition-all ${hall.constraints.allocation.strategy === 'diagonal' ? 'border-violet-500 bg-violet-50 dark:bg-violet-900/10 shadow-sm' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-gray-300'}`}
+                                                                            >
+                                                                                <p className={`text-sm font-bold ${hall.constraints.allocation.strategy === 'diagonal' ? 'text-violet-700 dark:text-violet-300' : 'text-gray-700 dark:text-gray-300'}`}>Diagonal</p>
+                                                                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">Cross-aligned zigzag pattern</p>
+                                                                            </button>
+                                                                        </div>
+
+                                                                        {hall.constraints.allocation.strategy === 'linear' && (
+                                                                            <div className="p-3 bg-gray-100 dark:bg-gray-700/50 rounded-lg animate-fadeIn">
+                                                                                <label className="block text-xs font-bold text-gray-600 dark:text-gray-400 mb-2 uppercase tracking-widest">Alignment Direction</label>
+                                                                                <div className="flex gap-2">
+                                                                                    <button 
+                                                                                        type="button"
+                                                                                        onClick={() => handleLinearDirectionChange(index, 'horizontal')}
+                                                                                        className={`flex-1 px-4 py-1.5 text-xs font-bold rounded transition-all ${hall.constraints.allocation.linearDirection === 'horizontal' ? 'bg-violet-600 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600'}`}
+                                                                                    >
+                                                                                        Horizontal
+                                                                                    </button>
+                                                                                    <button 
+                                                                                        type="button"
+                                                                                        onClick={() => handleLinearDirectionChange(index, 'vertical')}
+                                                                                        className={`flex-1 px-4 py-1.5 text-xs font-bold rounded transition-all ${hall.constraints.allocation.linearDirection === 'vertical' ? 'bg-violet-600 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-600'}`}
+                                                                                    >
+                                                                                        Vertical
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
                                                             {hall.constraints?.type === 'advanced' && (
                                                                 <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
-                                                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Allowed Student Sets</label>
+                                                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Allowed Student Sets & Limits</label>
                                                                     {activeExam.studentSets.filter(s => !s.isPlaceholder).length > 0 ? (
-                                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                                        <div className="space-y-4">
                                                                             {activeExam.studentSets.filter(s => !s.isPlaceholder).map(set => (
-                                                                                <label key={set.id} className="flex items-center gap-3 p-3 hover:bg-white dark:hover:bg-gray-700 rounded-lg transition-colors border border-gray-200 dark:border-gray-700">
-                                                                                    <input 
-                                                                                        type="checkbox"
-                                                                                        checked={hall.constraints?.allowedSetIds?.includes(set.id) || false}
-                                                                                        onChange={e => handleAllowedSetChange(index, set.id, e.target.checked)}
-                                                                                        className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-400 focus:ring-blue-500 bg-white dark:bg-gray-800"
-                                                                                    />
-                                                                                    <span className="text-sm text-gray-700 dark:text-gray-300">{set.subject}</span>
-                                                                                </label>
+                                                                                <div key={set.id} className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                                                    <label className="flex items-center gap-3 min-w-[150px]">
+                                                                                        <input 
+                                                                                            type="checkbox"
+                                                                                            checked={hall.constraints?.allowedSetIds?.includes(set.id) || false}
+                                                                                            onChange={e => handleAllowedSetChange(index, set.id, e.target.checked)}
+                                                                                            className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-400 focus:ring-blue-500 bg-white dark:bg-gray-800"
+                                                                                        />
+                                                                                        <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{set.subject}</span>
+                                                                                    </label>
+                                                                                    {hall.constraints?.allowedSetIds?.includes(set.id) && (
+                                                                                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                                                                                            <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Max Students:</span>
+                                                                                            <input 
+                                                                                                type="number"
+                                                                                                min="0"
+                                                                                                placeholder="Unlimited"
+                                                                                                value={hall.constraints.setLimits?.[set.id] || ''}
+                                                                                                onChange={e => handleSetLimitChange(index, set.id, e.target.value)}
+                                                                                                className="w-100 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white outline-none"
+                                                                                            />
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                             ))}
                                                                         </div>
                                                                     ) : (
@@ -2573,14 +2814,12 @@ const TeacherDashboard: React.FC = () => {
                         onClose={() => setHallEditorState({ mode: 'closed', hallIndex: null })}
                         onSave={handleSaveFromEditor}
                         initialLayout={
-                            hallEditorState.mode === 'edit-hall' && hallEditorState.hallIndex !== null
-                            ? activeExam.halls[hallEditorState.hallIndex]?.layout
-                            : (hallEditorState.mode === 'edit-template' && hallEditorState.templateId 
+                            hallEditorState.mode === 'edit-template' && hallEditorState.templateId 
                                 ? hallTemplates.find(t => t.id === hallEditorState.templateId)?.layout 
-                                : [])
+                                : []
                         }
                         initialName={hallEditorState.mode === 'edit-template' ? hallEditorState.templateName : undefined}
-                        isTemplateCreationMode={hallEditorState.mode === 'create-template' || hallEditorState.mode === 'edit-template'}
+                        isTemplateCreationMode={true}
                     />
                 )}
                 {isGridTemplateModalOpen && (
@@ -3076,7 +3315,7 @@ const TeacherDashboard: React.FC = () => {
                                                 placeholder="Subject / Code" 
                                                 value={newStudentSetTemplate.subject} 
                                                 onChange={e => setNewStudentSetTemplate({...newStudentSetTemplate, subject: e.target.value})}
-                                                size="sm"
+                                                inputSize="sm"
                                             />
                                             <Input 
                                                 type="number" 
@@ -3084,7 +3323,7 @@ const TeacherDashboard: React.FC = () => {
                                                 placeholder="Student Count" 
                                                 value={newStudentSetTemplate.studentCount} 
                                                 onChange={e => setNewStudentSetTemplate({...newStudentSetTemplate, studentCount: e.target.value})}
-                                                size="sm"
+                                                inputSize="sm"
                                             />
                                             {studentSetTemplateFormError && (
                                                 <div className="p-2 bg-red-50 dark:bg-red-900/10 rounded border border-red-200 dark:border-red-800">
@@ -3151,7 +3390,7 @@ const TeacherDashboard: React.FC = () => {
                                  <Card>
                                     <SeatingPlanVisualizer
                                         hall={hall}
-                                        plan={examForDownload.seatingPlan}
+                                        plan={examForDownload.seatingPlan!}
                                         studentSets={examForDownload.studentSets}
                                         seatDimensions={getSeatSizeFromRegisterNumbers(examForDownload.studentSets)}
                                     />

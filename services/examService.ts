@@ -1,6 +1,6 @@
-
 import { GoogleGenAI, Type } from '@google/genai';
-import { Hall, StudentSet, SeatingPlan, Exam, Seat, User, Role, HallTemplate, StudentSetTemplate, SeatDefinition, StudentInfo, AuditLog } from '../types';
+// Added Exam to the imports to resolve "Cannot find name 'Exam'" errors
+import { Hall, StudentSet, SeatingPlan, Seat, User, Role, HallTemplate, StudentSetTemplate, SeatDefinition, StudentInfo, AuditLog, Exam } from '../types';
 import { initialDbData } from './mockData';
 
 let db: typeof initialDbData = JSON.parse(JSON.stringify(initialDbData));
@@ -376,92 +376,111 @@ export const generateClassicSeatingPlan = async (
         studentQueues[set.id] = allStudents.filter(s => s.setId === set.id);
     });
 
-    if (seatingType === 'fair') {
-        let seatSkipCounter = 0;
+    for (const hall of halls) {
+        const hallPlacementCount: { [setId: string]: number } = {};
+        
+        // Basic sort by arrangement (horizontal vs vertical)
+        const seatsInHall = hall.layout
+            .filter(seat => seat.type !== 'faculty')
+            .sort((a, b) => {
+                const arrangement = hall.constraints?.arrangement || 'horizontal';
+                if (arrangement === 'vertical') {
+                    if (a.col !== b.col) return a.col - b.col;
+                    return a.row - b.row;
+                }
+                if (a.row !== b.row) return a.row - b.row;
+                return a.col - b.col;
+            });
+
+        const allPossibleSetIdsForHall = hall.constraints?.type === 'advanced'
+            ? hall.constraints.allowedSetIds!
+            : Object.keys(studentQueues);
+
+        const isSetEligibleForHall = (setId: string) => {
+            if (!allPossibleSetIdsForHall.includes(setId)) return false;
+            if (studentQueues[setId].length === 0) return false;
+            
+            if (hall.constraints?.type === 'advanced' && hall.constraints.setLimits) {
+                const limit = hall.constraints.setLimits[setId];
+                const currentCount = hallPlacementCount[setId] || 0;
+                if (limit !== undefined && currentCount >= limit) return false;
+            }
+            return true;
+        };
+
+        const allocation = hall.constraints?.allocation;
         let setCycleIndex = 0;
-        for (const hall of halls) {
-            const seatsInHall = hall.layout
-                .filter(seat => seat.type !== 'faculty')
-                .sort((a, b) => {
-                    const arrangement = hall.constraints?.arrangement || 'horizontal';
-                    if (arrangement === 'vertical') {
-                        if (a.col !== b.col) return a.col - b.col;
-                        return a.row - b.row;
+        let seatSkipCounter = 0;
+
+        for (const seat of seatsInHall) {
+            const eligibleSets = allPossibleSetIdsForHall.filter(id => isSetEligibleForHall(id));
+            if (eligibleSets.length === 0) break;
+
+            if (seatingType === 'fair' && eligibleSets.length === 1) {
+                if (seatSkipCounter > 0) {
+                    seatSkipCounter--;
+                    continue;
+                }
+                const setIdToUse = eligibleSets[0];
+                const studentToAssign = studentQueues[setIdToUse].shift()!;
+                assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                hallPlacementCount[setIdToUse] = (hallPlacementCount[setIdToUse] || 0) + 1;
+                seatSkipCounter = 1;
+            } else {
+                let studentToAssign: StudentInfo | undefined;
+
+                if (allocation?.enabled) {
+                    // ALLOCATION LOGIC (Linear or Diagonal)
+                    let targetIndex = 0;
+                    if (allocation.strategy === 'linear') {
+                        targetIndex = allocation.linearDirection === 'vertical' ? seat.col : seat.row;
+                    } else if (allocation.strategy === 'diagonal') {
+                        targetIndex = seat.row + seat.col;
                     }
-                    if (a.row !== b.row) return a.row - b.row;
-                    return a.col - b.col;
-                });
-            const allPossibleSetIdsForHall = hall.constraints?.type === 'advanced'
-                ? hall.constraints.allowedSetIds!
-                : Object.keys(studentQueues);
-            for (const seat of seatsInHall) {
-                const eligibleSetsForThisHall = allPossibleSetIdsForHall.filter(id => studentQueues[id].length > 0);
-                if (eligibleSetsForThisHall.length === 0) break;
-                if (eligibleSetsForThisHall.length === 1) {
-                    if (seatSkipCounter > 0) {
-                        seatSkipCounter--;
-                        continue;
+                    
+                    const preferredSetId = eligibleSets[targetIndex % eligibleSets.length];
+                    if (isSetEligibleForHall(preferredSetId)) {
+                        studentToAssign = studentQueues[preferredSetId].shift();
+                        if (studentToAssign) hallPlacementCount[preferredSetId] = (hallPlacementCount[preferredSetId] || 0) + 1;
+                    } else {
+                        // Fallback to avoid deadlocks if target set is full or restricted
+                        let triedFallback = 0;
+                        while(!studentToAssign && triedFallback < eligibleSets.length) {
+                             const fallbackSetId = eligibleSets[(targetIndex + triedFallback) % eligibleSets.length];
+                             if (isSetEligibleForHall(fallbackSetId)) {
+                                 studentToAssign = studentQueues[fallbackSetId].shift();
+                                 if (studentToAssign) hallPlacementCount[fallbackSetId] = (hallPlacementCount[fallbackSetId] || 0) + 1;
+                             }
+                             triedFallback++;
+                        }
                     }
-                    const setIdToUse = eligibleSetsForThisHall[0];
-                    if (studentQueues[setIdToUse] && studentQueues[setIdToUse].length > 0) {
-                        const studentToAssign = studentQueues[setIdToUse].shift()!;
-                        assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
-                        seatSkipCounter = 1;
-                    } else break;
                 } else {
-                    let studentToAssign: StudentInfo | undefined;
+                    // DEFAULT ROUND-ROBIN
                     let triedSets = 0;
-                    while (!studentToAssign && triedSets < eligibleSetsForThisHall.length) {
-                        const currentSetId = eligibleSetsForThisHall[setCycleIndex % eligibleSetsForThisHall.length];
-                        if (studentQueues[currentSetId].length > 0) studentToAssign = studentQueues[currentSetId].shift();
+                    while (!studentToAssign && triedSets < eligibleSets.length) {
+                        const currentSetId = eligibleSets[setCycleIndex % eligibleSets.length];
+                        if (isSetEligibleForHall(currentSetId)) {
+                            studentToAssign = studentQueues[currentSetId].shift();
+                            if (studentToAssign) hallPlacementCount[currentSetId] = (hallPlacementCount[currentSetId] || 0) + 1;
+                        }
                         setCycleIndex++;
                         triedSets++;
                     }
-                    if (studentToAssign) assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
-                    else break;
                 }
-            }
-        }
-    } else {
-        let setCycleIndex = 0;
-        for (const hall of halls) {
-            const seatsInHall = hall.layout
-                .filter(seat => seat.type !== 'faculty')
-                .sort((a, b) => {
-                    const arrangement = hall.constraints?.arrangement || 'horizontal';
-                    if (arrangement === 'vertical') {
-                        if (a.col !== b.col) return a.col - b.col;
-                        return a.row - b.row;
-                    }
-                    if (a.row !== b.row) return a.row - b.row;
-                    return a.col - b.col;
-                });
-            const getEligibleSetsForHall = () => {
-                const allRemaining = Object.keys(studentQueues).filter(id => studentQueues[id].length > 0);
-                const allowedSetIds = hall.constraints?.type === 'advanced' ? hall.constraints.allowedSetIds : null;
-                return allowedSetIds ? allRemaining.filter(id => allowedSetIds.includes(id)) : allRemaining;
-            };
-            for (const seat of seatsInHall) {
-                const eligibleSetsForThisHall = getEligibleSetsForHall();
-                if (eligibleSetsForThisHall.length === 0) break;
-                let studentToAssign: StudentInfo | undefined;
-                let triedSets = 0;
-                while (!studentToAssign && triedSets < eligibleSetsForThisHall.length) {
-                    const currentSetId = eligibleSetsForThisHall[setCycleIndex % eligibleSetsForThisHall.length];
-                    if (studentQueues[currentSetId].length > 0) studentToAssign = studentQueues[currentSetId].shift();
-                    setCycleIndex++;
-                    triedSets++;
-                }
-                if (studentToAssign) assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
-                else break;
+                
+                if (studentToAssign) {
+                    assignments.set(`${hall.id}-${seat.row}-${seat.col}`, studentToAssign);
+                } else break;
             }
         }
     }
+
     const unassignedStudents = Object.values(studentQueues).flat();
     if (unassignedStudents.length > 0) {
-        if (seatingType === 'fair') return { plan: null, message: "not enough seats for fair seating" };
-        return { plan: null, message: `Failed to assign all students. ${unassignedStudents.length} students remain unplaced.` };
+        if (seatingType === 'fair') return { plan: null, message: "Not enough seats for fair seating with these constraints." };
+        return { plan: null, message: `Failed to assign all students. ${unassignedStudents.length} students remain unplaced due to strict hall constraints.` };
     }
+
     const finalPlan: SeatingPlan = {};
     halls.forEach(hall => {
         const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));
@@ -483,21 +502,49 @@ export const generateSeatingPlan = async (
     if (!process.env.API_KEY) return { plan: null, message: "CRITICAL: API_KEY environment variable not set." };
     const allStudents = generateStudentList(studentSets);
     const availableSeats = halls.flatMap(hall => hall.layout.filter(seat => seat.type !== 'faculty'));
+    
     if (seatingType !== 'fair' && allStudents.length > availableSeats.length) {
         return { plan: null, message: `Not enough seats. Required: ${allStudents.length}, Available: ${availableSeats.length}.` };
     }
+
     const promptData = {
-        halls: halls.map(h => ({ id: h.id, name: h.name, seats: h.layout.map(s => ({ row: s.row, col: s.col, type: s.type })), constraints: h.constraints })),
-        studentSets: studentSets.map(s => ({ id: s.id, subject: s.subject, students: allStudents.filter(stu => stu.setId === s.id).map(stu => stu.id) }))
+        halls: halls.map(h => ({ 
+            id: h.id, 
+            name: h.name, 
+            seats: h.layout.map(s => ({ row: s.row, col: s.col, type: s.type })), 
+            constraints: h.constraints 
+        })),
+        studentSets: studentSets.map(s => ({ 
+            id: s.id, 
+            subject: s.subject, 
+            students: allStudents.filter(stu => stu.setId === s.id).map(stu => stu.id) 
+        }))
     };
-    let seatingRules = seatingType === 'fair' ? `**CRITICAL: FAIR SEATING MODE**...` : `**CRITICAL: NORMAL SEATING MODE**...`;
-    let constraintsPrompt = editorMode === 'ai-advanced' ? `**STRICT HARD CONSTRAINTS**...` : "";
-    const prompt = `Assistant task: Assign every student to unique seat... [JSON Data: ${JSON.stringify(promptData)}] ... [Rules: ${seatingRules} ${constraintsPrompt}] ... [Custom: ${rules}]`;
+
+    let seatingRules = seatingType === 'fair' ? `**CRITICAL: FAIR SEATING MODE** Students from same set should be separated. Avoid placing same subjects adjacent.` : `**CRITICAL: NORMAL SEATING MODE** Fill seats efficiently.`;
+    
+    let constraintsPrompt = (editorMode === 'ai-advanced' || editorMode === 'advanced') 
+        ? `**STRICT HARD CONSTRAINTS** Follow the 'constraints' field for each hall in JSON. 
+           If 'type' is 'advanced', ONLY students from 'allowedSetIds' can enter. 
+           If 'setLimits' is present, DO NOT exceed the specified maximum number of students for that set in that specific hall.
+           If 'allocation' is present and 'enabled' is true:
+             - If 'strategy' is 'linear': align students of the same set along the 'linearDirection' (horizontal=rows, vertical=columns).
+             - If 'strategy' is 'diagonal': place students in an alternating zigzag pattern so no straight linear alignment of the same set is formed.
+           If a hall limit for a subject is reached, that student MUST be placed in a subsequent hall.` 
+        : "";
+
+    const prompt = `Assistant task: Assign every student to a unique and valid seat based on constraints.
+    Return a list of assignments.
+    [JSON Data: ${JSON.stringify(promptData)}] 
+    [Rules: ${seatingRules} ${constraintsPrompt}] 
+    [User Custom Instructions: ${rules}]`;
+
     try {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
-            contents: [{ parts: [{ text: prompt }] }],
+            // Updated contents to align with Google GenAI SDK text prompt standard
+            contents: prompt,
             config: {
                 responseMimeType: 'application/json',
                 responseSchema: {
@@ -509,12 +556,17 @@ export const generateSeatingPlan = async (
         });
         const resultJson = JSON.parse(response.text);
         const assignments: { studentId: string, hallId: string, row: number, col: number }[] = resultJson.assignments;
-        if (assignments.length !== allStudents.length) return { plan: null, message: `AI Error: Expected ${allStudents.length}, got ${assignments.length}.` };
+        
+        if (assignments.length !== allStudents.length) {
+            return { plan: null, message: `AI Error: Expected ${allStudents.length} assignments, but got ${assignments.length}. Try refreshing or adjusting hall limits.` };
+        }
+
         const assignmentsMap = new Map<string, StudentInfo>();
         assignments.forEach(a => {
             const studentInfo = allStudents.find(s => s.id === a.studentId);
             if(studentInfo) assignmentsMap.set(`${a.hallId}-${a.row}-${a.col}`, studentInfo);
         });
+
         const finalPlan: SeatingPlan = {};
         halls.forEach(hall => {
             const maxRow = Math.max(-1, ...hall.layout.map(s => s.row));

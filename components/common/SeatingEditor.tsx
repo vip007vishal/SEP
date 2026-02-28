@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { SeatingPlan, Seat, StudentSet, StudentInfo, Hall } from '../../types';
 import { SET_COLORS } from '../../constants';
@@ -81,7 +82,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
             // Deep copy plan to avoid mutating props
             const copy: SeatingPlan = {};
             Object.keys(initialPlan).forEach(hId => {
-                copy[hId] = initialPlan[hId].map(row => row.map(seat => ({...seat})));
+                copy[hId] = initialPlan[hId].map(row => row.map(seat => seat ? ({...seat}) : null as any));
             });
             setPlan(copy);
             setSelectedHallId(halls[0]?.id || '');
@@ -100,7 +101,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
     }, [isOpen, initialPlan, halls]);
 
     const addToHistory = (newPlan: SeatingPlan, newHolding: StudentInfo[]) => {
-        // Create deep copies
+        // Create deep copies for historical state
         const snapshot: HistoryState = {
             plan: JSON.parse(JSON.stringify(newPlan)),
             holdingStudents: JSON.parse(JSON.stringify(newHolding))
@@ -109,13 +110,12 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
         const newHistory = history.slice(0, historyIndex + 1);
         newHistory.push(snapshot);
         
-        // Limit history size to prevent memory issues
         if (newHistory.length > 50) newHistory.shift();
 
         setHistory(newHistory);
         setHistoryIndex(newHistory.length - 1);
 
-        // Update View
+        // Update active View State
         setPlan(newPlan);
         setHoldingStudents(newHolding);
     };
@@ -220,12 +220,17 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
     const handleDropOnSeat = (e: React.DragEvent, targetHallId: string, targetRow: number, targetCol: number) => {
         e.preventDefault();
         
-        const currentHallPlan = plan[targetHallId];
+        // Surgical deep clone of current plan to ensure state immutability
+        const newPlan: SeatingPlan = {};
+        Object.keys(plan).forEach(hId => {
+            newPlan[hId] = plan[hId].map(row => row.map(seat => seat ? ({...seat}) : null as any));
+        });
+
+        const currentHallPlan = newPlan[targetHallId];
         if (!currentHallPlan) return;
         const targetSeat = currentHallPlan[targetRow]?.[targetCol];
         if (!targetSeat) return; 
 
-        const newPlan = { ...plan };
         let newHoldingStudents = [...holdingStudents];
 
         if (draggedSeat) {
@@ -251,7 +256,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
 
                     const destSeat = getSeat(destHallId, destRow, destCol);
                     if (!destSeat) {
-                        return; 
+                        return; // Cancel the entire move if any part of the selection lands outside boundaries
                     }
                     destinations.push({ hallId: destHallId, row: destRow, col: destCol, existingStudent: destSeat.student });
                 }
@@ -294,8 +299,9 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
         } 
         else if (draggedFromHolding) {
             if (targetSeat.student) {
+                const prevStudent = targetSeat.student;
                 newHoldingStudents = newHoldingStudents.filter(s => s.id !== draggedFromHolding.id);
-                newHoldingStudents.push(targetSeat.student!);
+                newHoldingStudents.push(prevStudent);
                 targetSeat.student = draggedFromHolding;
             } else {
                 newHoldingStudents = newHoldingStudents.filter(s => s.id !== draggedFromHolding.id);
@@ -312,24 +318,18 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
         e.preventDefault();
         
         if (draggedSeat) {
-            const newPlan = { ...plan };
+            const newPlan: SeatingPlan = {};
+            Object.keys(plan).forEach(hId => {
+                newPlan[hId] = plan[hId].map(row => row.map(seat => seat ? ({...seat}) : null as any));
+            });
+
             let newHoldingStudents = [...holdingStudents];
             const studentsToHold: StudentInfo[] = [];
-            const modifiedHalls = new Set<string>();
-
-            const getMutableHallPlan = (hId: string) => {
-                if (!modifiedHalls.has(hId)) {
-                    newPlan[hId] = newPlan[hId].map(row => row.map(s => ({...s})));
-                    modifiedHalls.add(hId);
-                }
-                return newPlan[hId];
-            };
 
             if (selectedSeatKeys.size > 0) {
                  selectedSeatKeys.forEach(key => {
                     const [h, r, c] = key.split('-');
-                    const hallPlan = getMutableHallPlan(h);
-                    const seat = hallPlan?.[parseInt(r)]?.[parseInt(c)];
+                    const seat = newPlan[h]?.[parseInt(r)]?.[parseInt(c)];
                     
                     if (seat && seat.student) {
                         studentsToHold.push(seat.student);
@@ -338,9 +338,8 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                  });
                  setSelectedSeatKeys(new Set());
             } else {
-                const hallPlan = getMutableHallPlan(draggedSeat.hallId);
-                const oldSeat = hallPlan[draggedSeat.row][draggedSeat.col];
-                if (oldSeat.student) {
+                const oldSeat = newPlan[draggedSeat.hallId]?.[draggedSeat.row]?.[draggedSeat.col];
+                if (oldSeat && oldSeat.student) {
                     studentsToHold.push(oldSeat.student);
                     delete oldSeat.student;
                 }
@@ -540,10 +539,7 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                              <button onClick={() => setSelectedSeatKeys(new Set())} className="text-xs font-medium hover:text-red-600 dark:hover:text-red-400 transition-colors">Clear</button>
                         </div>
 
-                        {/* Grid Wrapper - Generous spacing on all sides to prevent halls from sticking to edges */}
-                        {/* Increased padding-left (pl-40) for space from holding area */}
-                        {/* Increased padding-right (pr-40) for space on right side */}
-                        {/* Increased padding-bottom (pb-40) for space at bottom */}
+                        {/* Grid Wrapper */}
                         <div className="flex-grow flex justify-center items-start min-h-full min-w-full pt-20 pb-40 pl-40 pr-40">
                             {selectedHallId && plan[selectedHallId] && (() => {
                                 const currentGrid = plan[selectedHallId];
@@ -557,7 +553,6 @@ const SeatingEditor: React.FC<SeatingEditorProps> = ({ isOpen, onClose, onSave, 
                                         }}
                                         onClick={(e) => e.stopPropagation()}
                                     >
-                                        {/* Visual boundary indicator to show the hall is centered with space around */}
                                         <div className="absolute -inset-8 border-2 border-transparent pointer-events-none rounded-3xl"></div>
                                         
                                         {currentGrid.map((row, rIndex) => (
