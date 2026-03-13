@@ -1,20 +1,40 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Smart Exam Planner Advanced - KWS Ready
 
-# Run and deploy your AI Studio app
+This package keeps the advanced Smart Exam Planner app layout and workflow while converting it into a deployable backend/frontend project.
 
-This contains everything you need to run your app locally.
+## Included changes
 
-View your app in AI Studio: https://ai.studio/apps/106e04e0-08db-4bfe-8892-0024155d211d
+- real backend/frontend structure for deployment
+- Gemini API moved from browser to backend
+- real SMTP email OTP instead of static `123456`
+- superadmin controlled from backend env
+- no dummy seeded admin/teacher/student users
+- no dummy exam/template data
+- student login remains ephemeral and is not stored server-side
+- admin, teacher, exam, template, and audit data are stored in the backend JSON datastore
 
-## Run Locally
+## Important env values
 
-**Prerequisites:**  Node.js
+### backend/.env
+- `SUPERADMIN_NAME`
+- `SUPERADMIN_EMAIL`
+- `SUPERADMIN_PASSWORD`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `FRONTEND_ORIGIN`
 
+### frontend/.env
+- `VITE_API_BASE_URL`
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Default superadmin example
+
+- email: `vishal15v2006@gmail.com`
+- password: `password123`
+
+Change them in `backend/.env`.
