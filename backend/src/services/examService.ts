@@ -144,7 +144,11 @@ const ensureInstitute = (admin: User) => {
 
 const buildSeatAssignmentsForExam = (exam: Exam): SeatAssignment[] => {
   if (!exam.seatingPlan || !exam.instituteId) return [];
+
   const assignments: SeatAssignment[] = [];
+  const seenIds = new Set<string>();
+  const seenStudentExam = new Set<string>();
+  const seenSeatExam = new Set<string>();
 
   Object.entries(exam.seatingPlan).forEach(([hallId, hallPlan]) => {
     const hall = exam.halls.find((candidate) => candidate.id === hallId) || exam.halls.find((candidate) => candidate.name === hallId);
@@ -154,16 +158,34 @@ const buildSeatAssignmentsForExam = (exam: Exam): SeatAssignment[] => {
     hallPlan.forEach((row, rowIndex) => {
       row.forEach((seat, colIndex) => {
         if (!seat?.student) return;
+
+        const rollNo = String(seat.student.id).trim();
+        const studentKey = `${exam.id}:${rollNo.toLowerCase()}`;
+        const seatKey = `${exam.id}:${resolvedHallId}:${rowIndex}:${colIndex}`;
+
+        // Skip duplicate student/seat rows safely so regeneration never crashes.
+        if (seenStudentExam.has(studentKey)) return;
+        if (seenSeatExam.has(seatKey)) return;
+
+        let assignmentId = `assign_${exam.id}_${resolvedHallId}_${rollNo}_${rowIndex}_${colIndex}`;
+        if (seenIds.has(assignmentId)) {
+          assignmentId = `${assignmentId}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+        }
+
+        seenIds.add(assignmentId);
+        seenStudentExam.add(studentKey);
+        seenSeatExam.add(seatKey);
+
         assignments.push({
-          id: `assign_${exam.id}_${seat.student.id}_${rowIndex}_${colIndex}`,
+          id: assignmentId,
           instituteId: exam.instituteId!,
           examId: exam.id,
           examTitle: exam.title,
           examDate: exam.date,
           session: exam.session,
           startTime: exam.startTime,
-          studentRollNo: String(seat.student.id).trim(),
-          studentName: seat.student.id,
+          studentRollNo: rollNo,
+          studentName: (seat.student as any).name || rollNo,
           hallId: resolvedHallId,
           hallName,
           row: rowIndex,
@@ -179,9 +201,17 @@ const buildSeatAssignmentsForExam = (exam: Exam): SeatAssignment[] => {
 
 const replaceSeatAssignmentsForExam = (exam: Exam) => {
   db.seatAssignments = db.seatAssignments.filter((assignment) => assignment.examId !== exam.id);
-  if (exam.seatingPlan) {
-    db.seatAssignments.push(...buildSeatAssignmentsForExam(exam));
-  }
+  if (!exam.seatingPlan) return;
+
+  const rebuiltAssignments = buildSeatAssignmentsForExam(exam);
+  const seen = new Set<string>();
+  const uniqueAssignments = rebuiltAssignments.filter((assignment) => {
+    if (seen.has(assignment.id)) return false;
+    seen.add(assignment.id);
+    return true;
+  });
+
+  db.seatAssignments.push(...uniqueAssignments);
 };
 
 const saveExamVersion = (exam: Exam, createdBy: string, notes?: string) => {
@@ -526,7 +556,6 @@ export const getExamsForStudent = async (registerNumber: string, instituteId: st
 
 export const getExamsForTeacher = async (teacherId: string): Promise<Exam[]> => {
   await delay();
-  await purgeExpiredSeatingData();
   return db.exams.filter((e) => e.createdBy === teacherId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 

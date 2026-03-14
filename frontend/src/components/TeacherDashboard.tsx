@@ -1013,65 +1013,82 @@ const TeacherDashboard: React.FC = () => {
     };
 
     const handleGeneratePlan = async () => {
-        if (!activeExam) return;
+        if (!activeExam || !user) return;
         setFormError('');
-        setFormWarning('');
+        setFormWarning('It will take time around a minute. If it lasts long, do not worry — the plan will still be generated. For very big seating plans, please relogin once and reopen the exam to view the full seating.');
 
         const parsedExamData = validateAndParseForm();
         if (!parsedExamData) return;
         
         setIsLoading(true);
 
-        let result;
-        if (activeExam.editorMode === 'classic' || activeExam.editorMode === 'advanced') {
-            result = await generateClassicSeatingPlan({
-                halls: parsedExamData.halls as Hall[], 
-                studentSets: parsedExamData.studentSets as StudentSet[], 
-                seatingType: parsedExamData.seatingType || 'normal',
-            });
-        } else { // 'ai' or 'ai-advanced' mode
-            result = await generateSeatingPlan({
-                halls: parsedExamData.halls as Hall[], 
-                studentSets: parsedExamData.studentSets as StudentSet[], 
-                rules: parsedExamData.aiSeatingRules || '',
-                seatingType: parsedExamData.seatingType || 'normal',
-                editorMode: parsedExamData.editorMode
-            });
-        }
-        
-        if (result.plan) {
-            let savedExam: Exam;
+        try {
+            let result;
+            if (activeExam.editorMode === 'classic' || activeExam.editorMode === 'advanced') {
+                result = await generateClassicSeatingPlan({
+                    halls: parsedExamData.halls as Hall[], 
+                    studentSets: parsedExamData.studentSets as StudentSet[], 
+                    seatingType: parsedExamData.seatingType || 'normal',
+                });
+            } else { // 'ai' or 'ai-advanced' mode
+                result = await generateSeatingPlan({
+                    halls: parsedExamData.halls as Hall[], 
+                    studentSets: parsedExamData.studentSets as StudentSet[], 
+                    rules: parsedExamData.aiSeatingRules || '',
+                    seatingType: parsedExamData.seatingType || 'normal',
+                    editorMode: parsedExamData.editorMode
+                });
+            }
+            
+            if (result.plan) {
+                let savedExam: Exam;
 
-            if (parsedExamData.id) {
-                const examWithPlan = { ...parsedExamData, seatingPlan: result.plan } as Exam;
-                savedExam = await updateExam(examWithPlan);
-            } else {
-                savedExam = await createExam({
-                    title: parsedExamData.title,
-                    date: parsedExamData.date,
-                    halls: parsedExamData.halls,
-                    studentSets: parsedExamData.studentSets,
-                    aiSeatingRules: parsedExamData.aiSeatingRules,
-                    seatingType: parsedExamData.seatingType,
-                    editorMode: parsedExamData.editorMode,
-                    seatingPlan: result.plan,
-                    session: parsedExamData.session,
-                    startTime: parsedExamData.startTime,
-                    status: 'GENERATED',
-                    autoDeleteSeatingAfterExam: parsedExamData.autoDeleteSeatingAfterExam,
-                }, user!.id);
+                if (parsedExamData.id) {
+                    const examWithPlan = { ...parsedExamData, seatingPlan: result.plan, status: 'GENERATED' } as Exam;
+                    savedExam = await updateExam(examWithPlan);
+                } else {
+                    savedExam = await createExam({
+                        title: parsedExamData.title,
+                        date: parsedExamData.date,
+                        halls: parsedExamData.halls,
+                        studentSets: parsedExamData.studentSets,
+                        aiSeatingRules: parsedExamData.aiSeatingRules,
+                        seatingType: parsedExamData.seatingType,
+                        editorMode: parsedExamData.editorMode,
+                        seatingPlan: result.plan,
+                        session: parsedExamData.session,
+                        startTime: parsedExamData.startTime,
+                        status: 'GENERATED',
+                        autoDeleteSeatingAfterExam: parsedExamData.autoDeleteSeatingAfterExam,
+                    }, user.id);
+                }
+
+                setActiveExam(savedExam as FormExam);
+                setExams(prev => {
+                    const idx = prev.findIndex(e => e.id === savedExam.id);
+                    if (idx === -1) return [savedExam, ...prev];
+                    const copy = [...prev];
+                    copy[idx] = savedExam;
+                    return copy;
+                });
+
+                if (result.message) {
+                    setFormWarning(`${result.message} For large plans, if the full view takes longer to open, relogin and reopen the exam once.`);
+                } else {
+                    setFormWarning('Plan generated and saved. For very large plans, if the full view takes longer to load, relogin and reopen the exam once.');
+                }
+
+                setIsLoading(false);
+                void fetchExams().catch(() => undefined);
+                return;
             }
 
-            await fetchExams();
-            setActiveExam(savedExam);
-
-            if (result.message) {
-                setFormWarning(result.message);
-            }
-        } else {
             setFormError(result.message || 'Failed to generate seating plan. Please check your configuration and try again.');
+        } catch (error: any) {
+            setFormError(error?.message || 'Failed to generate seating plan. Please try again.');
+        } finally {
+            setIsLoading(false);
         }
-        setIsLoading(false);
     };
 
 
@@ -1452,35 +1469,53 @@ const TeacherDashboard: React.FC = () => {
 
     const handleQuickGeneratePlan = async (exam: Exam) => {
         setGeneratingPlanId(exam.id);
+        setFormError('');
+        setFormWarning('It will take time around a minute. If it lasts long, do not worry — the plan will still be generated. For very big seating plans, please relogin once and reopen the exam to view the full seating.');
         
-        let result;
-        if (exam.editorMode === 'classic' || exam.editorMode === 'advanced') {
-             result = await generateClassicSeatingPlan({
-                halls: exam.halls, 
-                studentSets: exam.studentSets,
-                seatingType: exam.seatingType || 'normal',
-            });
-        } else {
-             result = await generateSeatingPlan({
-                halls: exam.halls, 
-                studentSets: exam.studentSets, 
-                rules: exam.aiSeatingRules || 'Arrange students fairly.',
-                seatingType: exam.seatingType || 'normal',
-                editorMode: exam.editorMode
-            });
-        }
-
-        if (result.plan) {
-            const examWithPlan = { ...exam, seatingPlan: result.plan };
-            await updateExam(examWithPlan);
-            await fetchExams();
-            if (result.message) {
-                window.alert(result.message);
+        try {
+            let result;
+            if (exam.editorMode === 'classic' || exam.editorMode === 'advanced') {
+                 result = await generateClassicSeatingPlan({
+                    halls: exam.halls, 
+                    studentSets: exam.studentSets,
+                    seatingType: exam.seatingType || 'normal',
+                });
+            } else {
+                 result = await generateSeatingPlan({
+                    halls: exam.halls, 
+                    studentSets: exam.studentSets, 
+                    rules: exam.aiSeatingRules || 'Arrange students fairly.',
+                    seatingType: exam.seatingType || 'normal',
+                    editorMode: exam.editorMode
+                });
             }
-        } else {
+
+            if (result.plan) {
+                const examWithPlan = { ...exam, seatingPlan: result.plan, status: 'GENERATED' as const };
+                const savedExam = await updateExam(examWithPlan);
+
+                setExams(prev => prev.map(e => e.id === savedExam.id ? savedExam : e));
+                if (activeExam?.id === savedExam.id) {
+                    setActiveExam(savedExam as FormExam);
+                }
+
+                if (result.message) {
+                    setFormWarning(`${result.message} For large plans, if the full view takes longer to open, relogin and reopen the exam once.`);
+                } else {
+                    setFormWarning('Plan generated and saved. For very large plans, if the full view takes longer to load, relogin and reopen the exam once.');
+                }
+
+                setGeneratingPlanId(null);
+                void fetchExams().catch(() => undefined);
+                return;
+            }
+
             window.alert(result.message || 'Failed to generate seating plan. Not enough seats for all students.');
+        } catch (error: any) {
+            window.alert(error?.message || 'Failed to generate seating plan. Please try again.');
+        } finally {
+            setGeneratingPlanId(null);
         }
-        setGeneratingPlanId(null);
     };
 
     const handleDownloadAll = (exam: Exam) => {
@@ -2694,7 +2729,7 @@ const TeacherDashboard: React.FC = () => {
                                         {isLoading ? (
                                             <span className="flex items-center justify-center gap-2">
                                                 <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                                                Generating Plan...
+                                                Generating and Saving...
                                             </span>
                                         ) : 'Generate Seating Plan'}
                                     </Button>

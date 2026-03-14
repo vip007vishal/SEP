@@ -291,7 +291,23 @@ export const saveDb = async (db: DbData) => {
       );
     }
 
+    const seatAssignmentsByStudent = new Map<string, SeatAssignment>();
+    const seenSeatKeys = new Set<string>();
+
     for (const assignment of db.seatAssignments || []) {
+      const studentKey = `${assignment.examId}:${String(assignment.studentRollNo).trim().toLowerCase()}`;
+      const seatKey = `${assignment.examId}:${assignment.hallId}:${assignment.row}:${assignment.col}`;
+
+      if (seenSeatKeys.has(seatKey)) continue;
+      if (seatAssignmentsByStudent.has(studentKey)) continue;
+
+      seatAssignmentsByStudent.set(studentKey, assignment);
+      seenSeatKeys.add(seatKey);
+    }
+
+    const uniqueSeatAssignments = Array.from(seatAssignmentsByStudent.values());
+
+    for (const assignment of uniqueSeatAssignments) {
       await client.query(
         `INSERT INTO seat_assignments (id, institute_id, exam_id, exam_title, exam_date, session, start_time, student_roll_no, student_name, hall_id, hall_name, row_index, col_index, seat_label)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,

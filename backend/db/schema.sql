@@ -118,6 +118,9 @@ ALTER TABLE seat_assignments ADD COLUMN IF NOT EXISTS session TEXT;
 ALTER TABLE seat_assignments ADD COLUMN IF NOT EXISTS start_time TEXT;
 CREATE INDEX IF NOT EXISTS idx_seat_assignments_institute_roll ON seat_assignments(institute_id, student_roll_no);
 CREATE INDEX IF NOT EXISTS idx_seat_assignments_exam_id ON seat_assignments(exam_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seat_assignments_exam_student ON seat_assignments(exam_id, student_roll_no);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_seat_assignments_exam_seat ON seat_assignments(exam_id, hall_id, row_index, col_index);
+
 
 CREATE TABLE IF NOT EXISTS seating_plan_versions (
   id TEXT PRIMARY KEY,
