@@ -9,12 +9,14 @@ const methods: Record<string, (...args: any[]) => Promise<any>> = {
   getAuditLogs: examService.getAuditLogs,
   getAllAdmins: examService.getAllAdmins,
   grantAdminPermission: examService.grantAdminPermission,
+  rejectAdminRequest: examService.rejectAdminRequest,
   deleteAdminAndInstitution: examService.deleteAdminAndInstitution,
   getInstitutions: examService.getInstitutions,
   findUserById: examService.findUserById,
   getTeachersForAdmin: examService.getTeachersForAdmin,
   getUnassignedTeachers: examService.getUnassignedTeachers,
   grantTeacherPermission: examService.grantTeacherPermission,
+  rejectTeacherPermission: examService.rejectTeacherPermission,
   revokeTeacherPermission: examService.revokeTeacherPermission,
   deleteTeacher: examService.deleteTeacher,
   getExamsForAdmin: examService.getExamsForAdmin,
@@ -34,16 +36,26 @@ const methods: Record<string, (...args: any[]) => Promise<any>> = {
   createStudentSetTemplate: examService.createStudentSetTemplate,
   updateStudentSetTemplate: examService.updateStudentSetTemplate,
   deleteStudentSetTemplate: examService.deleteStudentSetTemplate,
+  getSeatingTemplatesForTeacher: examService.getSeatingTemplatesForTeacher,
+  getSeatingTemplatesForAdmin: examService.getSeatingTemplatesForAdmin,
+  createSeatingTemplateFromExam: examService.createSeatingTemplateFromExam,
+  applySeatingTemplateToExam: examService.applySeatingTemplateToExam,
+  getExamVersionHistory: examService.getExamVersionHistory,
+  restoreExamVersion: examService.restoreExamVersion,
+  validateExamForPublish: examService.validateExamForPublish,
+  publishExam: examService.publishExam,
+  lockExam: examService.lockExam,
   generateClassicSeatingPlan: examService.generateClassicSeatingPlan,
   generateSeatingPlan: examService.generateSeatingPlan,
   generateLayoutFromImage: examService.generateLayoutFromImage,
 };
 
 const mutatingMethods = new Set([
-  "grantAdminPermission", "deleteAdminAndInstitution", "grantTeacherPermission", "revokeTeacherPermission",
+  "grantAdminPermission", "rejectAdminRequest", "deleteAdminAndInstitution", "grantTeacherPermission", "rejectTeacherPermission", "revokeTeacherPermission",
   "deleteTeacher", "createExam", "updateExam", "updateExamSeatingPlan", "deleteExam",
   "createHallTemplate", "updateHallTemplate", "deleteHallTemplate",
   "createStudentSetTemplate", "updateStudentSetTemplate", "deleteStudentSetTemplate",
+  "createSeatingTemplateFromExam", "applySeatingTemplateToExam", "restoreExamVersion", "publishExam", "lockExam",
 ]);
 
 const sanitizePayload = (payload: any): any => {

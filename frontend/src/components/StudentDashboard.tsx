@@ -162,7 +162,7 @@ const ExamListView: React.FC<{
                             <div className="flex-grow min-w-0">
                                 <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-1 truncate group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">{exam.title}</h3>
                                 <p className="text-sm text-slate-500 dark:text-slate-400 truncate">
-                                    {exam.halls.length} Hall{exam.halls.length !== 1 ? 's' : ''} • {exam.studentSets.length} Subject{exam.studentSets.length !== 1 ? 's' : ''}
+                                    {exam.halls.length} Hall{exam.halls.length !== 1 ? 's' : ''} • {exam.studentSets.length} Subject{exam.studentSets.length !== 1 ? 's' : ''} • {exam.session || 'Morning'}{exam.startTime ? ` • ${exam.startTime}` : ''}
                                 </p>
                             </div>
                         </div>
@@ -333,7 +333,7 @@ const StudentDashboard: React.FC = () => {
                                 <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">{selectedExam.title}</h2>
                                 <p className="text-slate-500 dark:text-slate-400 flex items-center gap-2">
                                     <CalendarIcon className="h-5 w-5 text-violet-500" />
-                                    {new Date(selectedExam.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                                    {new Date(selectedExam.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}{selectedExam.session ? ` • ${selectedExam.session}` : ''}{selectedExam.startTime ? ` • ${selectedExam.startTime}` : ''}
                                 </p>
                             </Card>
 

@@ -5,6 +5,7 @@ import {
     getTeachersForAdmin, 
     getUnassignedTeachers,
     grantTeacherPermission,
+    rejectTeacherPermission,
     revokeTeacherPermission,
     getExamsForAdmin, 
     deleteExam, 
@@ -131,7 +132,18 @@ const AdminDashboard: React.FC = () => {
 
     const handleGrantPermission = async (teacherId: string) => {
         if (!user) return;
-        await grantTeacherPermission(teacherId, user.id);
+        const reason = window.prompt('Optional approval note', 'approved successfully') || 'approved successfully';
+        await grantTeacherPermission(teacherId, user.id, reason);
+        fetchAllTeachers();
+        fetchLogs();
+    };
+
+
+    const handleRejectPermission = async (teacherId: string) => {
+        if (!user) return;
+        const reason = window.prompt('Enter rejection reason', 'rejected because duplicate institute');
+        if (!reason) return;
+        await rejectTeacherPermission(teacherId, user.id, reason);
         fetchAllTeachers();
         fetchLogs();
     };
@@ -791,7 +803,7 @@ const AdminDashboard: React.FC = () => {
                                         <div className="p-1 bg-amber-200 dark:bg-amber-800 rounded-full">
                                             <CheckIcon className="h-4 w-4" />
                                         </div>
-                                        Pending Approvals ({unassignedTeachers.length})
+                                        Pending / Review ({unassignedTeachers.length})
                                     </h4>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {unassignedTeachers.map(teacher => (

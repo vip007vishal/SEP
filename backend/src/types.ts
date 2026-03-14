@@ -6,6 +6,9 @@ export enum Role {
 }
 
 export type SeatType = 'standard' | 'accessible' | 'faculty';
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export type ExamStatus = 'DRAFT' | 'GENERATED' | 'PUBLISHED' | 'LOCKED';
+export type ExamSession = 'Morning' | 'Afternoon' | 'Evening';
 
 export interface User {
   id: string;
@@ -18,6 +21,8 @@ export interface User {
   adminId?: string;
   institutionName?: string;
   instituteId?: string;
+  approvalStatus?: ApprovalStatus;
+  approvalReason?: string;
 }
 
 export interface Institute {
@@ -66,6 +71,7 @@ export interface HallTemplate {
   createdBy: string;
   adminId: string;
   instituteId?: string;
+  templateSource?: 'manual' | 'imported';
 }
 
 export interface StudentSetTemplate {
@@ -76,6 +82,7 @@ export interface StudentSetTemplate {
   createdBy: string;
   adminId: string;
   instituteId?: string;
+  templateSource?: 'manual' | 'imported';
 }
 
 export interface StudentSet {
@@ -101,10 +108,25 @@ export interface SeatingPlan {
   [hallId: string]: Seat[][];
 }
 
+export interface ValidationIssue {
+  code: string;
+  level: 'error' | 'warning';
+  message: string;
+}
+
+export interface ValidationReport {
+  generatedAt: string;
+  isValid: boolean;
+  errors: ValidationIssue[];
+  warnings: ValidationIssue[];
+}
+
 export interface Exam {
   id: string;
   title: string;
   date: string;
+  session?: ExamSession;
+  startTime?: string;
   halls: Hall[];
   studentSets: StudentSet[];
   seatingPlan?: SeatingPlan;
@@ -114,6 +136,37 @@ export interface Exam {
   createdBy: string;
   adminId: string;
   instituteId?: string;
+  status?: ExamStatus;
+  publishedAt?: string;
+  lockedAt?: string;
+  validationReport?: ValidationReport;
+  seatingPlanVersion?: number;
+  autoDeleteSeatingAfterExam?: boolean;
+  sourceTemplateId?: string;
+}
+
+export interface SeatingPlanVersion {
+  id: string;
+  examId: string;
+  versionNumber: number;
+  seatingPlan: SeatingPlan;
+  validationReport?: ValidationReport;
+  createdBy: string;
+  createdAt: string;
+  notes?: string;
+}
+
+export interface SeatingPlanTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  createdBy: string;
+  adminId: string;
+  instituteId?: string;
+  halls: Hall[];
+  studentSets: StudentSet[];
+  seatingPlan: SeatingPlan;
+  createdAt: string;
 }
 
 export interface SeatAssignment {
@@ -122,6 +175,8 @@ export interface SeatAssignment {
   examId: string;
   examTitle: string;
   examDate: string;
+  session?: ExamSession;
+  startTime?: string;
   studentRollNo: string;
   studentName?: string;
   hallId: string;

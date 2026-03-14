@@ -15,12 +15,13 @@ const Login: React.FC = () => {
     const [password, setPassword] = useState('');
     const [registerNumber, setRegisterNumber] = useState('');
     const [loginType, setLoginType] = useState<'super' | 'admin' | 'teacher' | 'student'>('admin');
-    const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+    const [authMode, setAuthMode] = useState<'login' | 'register' | 'reset'>('login');
     const [registerName, setRegisterName] = useState('');
     const [registerPassword, setRegisterPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [registerInstitution, setRegisterInstitution] = useState('');
     const [adminIdentifier, setAdminIdentifier] = useState('');
+    const [resetNewPassword, setResetNewPassword] = useState('');
     
     const [institutions, setInstitutions] = useState<{ id: string, name: string }[]>([]);
     const [selectedInstitution, setSelectedInstitution] = useState('');
@@ -30,7 +31,7 @@ const Login: React.FC = () => {
     const [error, setError] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const { requestLoginOtp, verifyLoginOtp, loginStudent, registerTeacher, registerAdmin } = useAuth();
+    const { requestLoginOtp, verifyLoginOtp, loginStudent, registerTeacher, registerAdmin, requestPasswordResetOtp, verifyPasswordResetOtp } = useAuth();
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -224,6 +225,66 @@ const Login: React.FC = () => {
         }
     };
 
+
+    const handlePasswordResetRequest = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError('');
+        setSuccessMessage('');
+        try {
+            await requestPasswordResetOtp(email, resetNewPassword);
+            setSuccessMessage('A password reset OTP has been sent to your email.');
+            setStep(2);
+        } catch (resetError: any) {
+            setError(resetError.message || 'Unable to send password reset OTP.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handlePasswordResetVerify = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoading(true);
+        setError('');
+        setSuccessMessage('');
+        try {
+            await verifyPasswordResetOtp(email, otp);
+            setSuccessMessage('Password reset successful. Please log in with your new password.');
+            setAuthMode('login');
+            setStep(1);
+            setPassword('');
+            setOtp('');
+            setResetNewPassword('');
+        } catch (resetError: any) {
+            setError(resetError.message || 'Unable to verify password reset OTP.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const renderPasswordResetForm = () => (
+        step === 1 ? (
+            <form onSubmit={handlePasswordResetRequest}>
+                <h2 className="text-2xl font-black text-center mb-6">Reset Password</h2>
+                <div className="space-y-4">
+                    <Input label="Email Address" id="resetEmail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="Enter your account email" />
+                    <Input label="New Password" id="resetPassword" type="password" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} required placeholder="Minimum 6 characters" />
+                </div>
+                <Button type="submit" className="w-full mt-6" disabled={isLoading}>{isLoading ? 'Sending OTP...' : 'Send Reset OTP'}</Button>
+                <Button variant="secondary" onClick={() => { setAuthMode('login'); setStep(1); setError(''); setSuccessMessage(''); }} className="w-full mt-2">Back to Login</Button>
+            </form>
+        ) : (
+            <form onSubmit={handlePasswordResetVerify}>
+                <h2 className="text-2xl font-black text-center mb-6">Verify Reset OTP</h2>
+                <div className="space-y-4">
+                    <Input label="One-Time Password" id="resetOtp" type="text" value={otp} onChange={(e) => setOtp(e.target.value)} required placeholder="Enter 6-digit code" />
+                </div>
+                <Button type="submit" className="w-full mt-6" disabled={isLoading}>{isLoading ? 'Resetting...' : 'Verify & Reset'}</Button>
+                <Button variant="secondary" onClick={() => { setStep(1); setError(''); }} className="w-full mt-2">Back</Button>
+            </form>
+        )
+    );
+
     const handleLoginTypeChange = (type: 'super' | 'admin' | 'teacher' | 'student') => {
         setLoginType(type);
         setError('');
@@ -240,6 +301,7 @@ const Login: React.FC = () => {
         setRegisterInstitution('');
         setAdminIdentifier('');
         setSelectedInstitution('');
+        setResetNewPassword('');
     }
 
     const renderSuperAdminForm = () => (
@@ -274,6 +336,9 @@ const Login: React.FC = () => {
     );
 
     const renderAdminForm = () => {
+        if (authMode === 'reset') {
+            return renderPasswordResetForm();
+        }
         if (authMode === 'register') {
             return (
                 <form onSubmit={handleAdminRegister}>
@@ -307,6 +372,7 @@ const Login: React.FC = () => {
                         <Button type="submit" className="w-full mt-6" disabled={isLoading}>
                             {isLoading ? 'Loading...' : 'Continue'}
                         </Button>
+                        <button type="button" onClick={() => { setAuthMode('reset'); setError(''); setSuccessMessage(''); setStep(1); }} className="text-sm font-bold text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mt-4 block mx-auto">Forgot password?</button>
                         <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-4">
                             New institution?{' '}
                             <button type="button" onClick={() => { setAuthMode('register'); setError(''); }} className="font-bold text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 focus:outline-none">
@@ -335,6 +401,9 @@ const Login: React.FC = () => {
 
 
     const renderTeacherForm = () => {
+        if (authMode === 'reset') {
+            return renderPasswordResetForm();
+        }
         if (authMode === 'register') {
             return (
                 <form onSubmit={handleTeacherRegister}>
@@ -368,6 +437,7 @@ const Login: React.FC = () => {
                         <Button type="submit" className="w-full mt-6" disabled={isLoading}>
                             {isLoading ? 'Loading...' : 'Continue'}
                         </Button>
+                        <button type="button" onClick={() => { setAuthMode('reset'); setError(''); setSuccessMessage(''); setStep(1); }} className="text-sm font-bold text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 mt-4 block mx-auto">Forgot password?</button>
                         <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-4">
                             Don't have an account?{' '}
                             <button type="button" onClick={() => { setAuthMode('register'); setError(''); }} className="font-bold text-violet-600 hover:text-violet-500 dark:text-violet-400 dark:hover:text-violet-300 focus:outline-none">

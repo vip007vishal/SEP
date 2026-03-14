@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint, User, SeatingPlan, HallAllocation } from '../types';
+import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint, User, SeatingPlan, HallAllocation, SeatingPlanTemplate, SeatingPlanVersion } from '../types';
 import { 
     getExamsForTeacher, 
     generateSeatingPlan,
@@ -18,7 +18,13 @@ import {
     deleteStudentSetTemplate,
     getTeachersForAdmin,
     updateExamSeatingPlan,
-    findUserById
+    findUserById,
+    createSeatingTemplateFromExam,
+    getExamVersionHistory,
+    restoreExamVersion,
+    validateExamForPublish,
+    publishExam,
+    lockExam
 } from '../services/examService';
 import Header from './common/Header';
 import Card from './common/Card';
@@ -288,6 +294,7 @@ const TeacherDashboard: React.FC = () => {
         height: 60,
         fontSize: 12
     });
+    const [versionHistory, setVersionHistory] = useState<SeatingPlanVersion[]>([]);
 
     const initialNewExamState: FormExam = {
         id: '',
@@ -298,6 +305,10 @@ const TeacherDashboard: React.FC = () => {
         aiSeatingRules: '',
         seatingType: 'normal',
         editorMode: 'ai',
+        session: 'Morning',
+        startTime: '',
+        status: 'DRAFT',
+        autoDeleteSeatingAfterExam: true,
         createdBy: user?.id || '',
         adminId: user?.adminId || ''
     };
@@ -367,7 +378,7 @@ const TeacherDashboard: React.FC = () => {
     }
 
     // --- Form State Handlers ---
-    const handleFormChange = (field: 'title' | 'date' | 'aiSeatingRules', value: string) => {
+    const handleFormChange = (field: 'title' | 'date' | 'aiSeatingRules' | 'session' | 'startTime', value: string) => {
         if (!activeExam) return;
         setActiveExam(prev => prev ? { ...prev, [field]: value } : null);
     };
@@ -843,7 +854,7 @@ const TeacherDashboard: React.FC = () => {
                 setStudentSetTemplateFormError("A template with this subject/code already exists.");
                 return;
             }
-            await createStudentSetTemplate({ subject: subject.trim(), studentCount: parsedCount }, user.id);
+            await createStudentSetTemplate({ subject: subject.trim(), studentCount: parsedCount, templateSource: 'manual' }, user.id);
         }
         
         setNewStudentSetTemplate({ subject: '', studentCount: '' });
@@ -875,7 +886,7 @@ const TeacherDashboard: React.FC = () => {
 
         setSavingTemplateForSetId(set.id);
         try {
-            await createStudentSetTemplate({ subject, studentCount }, user.id);
+            await createStudentSetTemplate({ subject, studentCount, students: set.students || [], templateSource: set.students?.length ? 'imported' : 'manual' }, user.id);
             await fetchStudentSetTemplates();
             
             setRecentlySavedSetIds(prev => [...prev, set.id]);
@@ -941,6 +952,12 @@ const TeacherDashboard: React.FC = () => {
                 id: activeExam.id || undefined,
                 createdBy: activeExam.createdBy || user?.id || '',
                 adminId: activeExam.adminId || user?.adminId || '',
+                session: activeExam.session || 'Morning',
+                startTime: activeExam.startTime || '',
+                status: activeExam.status || 'DRAFT',
+                autoDeleteSeatingAfterExam: activeExam.autoDeleteSeatingAfterExam ?? true,
+                validationReport: activeExam.validationReport,
+                seatingPlanVersion: activeExam.seatingPlanVersion || 0,
             };
         } catch (e: any) {
             setFormError(e.message);
@@ -983,6 +1000,10 @@ const TeacherDashboard: React.FC = () => {
                 aiSeatingRules: parsedExamData.aiSeatingRules,
                 seatingType: parsedExamData.seatingType,
                 editorMode: parsedExamData.editorMode,
+                session: parsedExamData.session,
+                startTime: parsedExamData.startTime,
+                status: parsedExamData.status,
+                autoDeleteSeatingAfterExam: parsedExamData.autoDeleteSeatingAfterExam,
             }, user.id);
         }
         
@@ -1034,6 +1055,10 @@ const TeacherDashboard: React.FC = () => {
                     seatingType: parsedExamData.seatingType,
                     editorMode: parsedExamData.editorMode,
                     seatingPlan: result.plan,
+                    session: parsedExamData.session,
+                    startTime: parsedExamData.startTime,
+                    status: 'GENERATED',
+                    autoDeleteSeatingAfterExam: parsedExamData.autoDeleteSeatingAfterExam,
                 }, user!.id);
             }
 
@@ -1047,6 +1072,84 @@ const TeacherDashboard: React.FC = () => {
             setFormError(result.message || 'Failed to generate seating plan. Please check your configuration and try again.');
         }
         setIsLoading(false);
+    };
+
+
+    const handleValidateCurrentExam = async () => {
+        if (!activeExam?.id) {
+            setFormWarning('Save and generate the exam first to validate it.');
+            return;
+        }
+        try {
+            const report = await validateExamForPublish(activeExam.id);
+            setActiveExam(prev => prev ? { ...prev, validationReport: report } : null);
+            setFormWarning(report.isValid ? 'Validation passed. You can publish this seating plan.' : `Validation found ${report.errors.length} error(s) and ${report.warnings.length} warning(s).`);
+            await fetchExams();
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to validate exam.');
+        }
+    };
+
+    const handlePublishCurrentExam = async () => {
+        if (!activeExam?.id || !user) return;
+        try {
+            const saved = await publishExam(activeExam.id, user.id);
+            setActiveExam(saved as FormExam);
+            setFormWarning('Seating plan published. Students can now view it.');
+            await fetchExams();
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to publish exam.');
+        }
+    };
+
+    const handleLockCurrentExam = async () => {
+        if (!activeExam?.id || !user) return;
+        try {
+            const saved = await lockExam(activeExam.id, user.id);
+            setActiveExam(saved as FormExam);
+            setFormWarning('Seating plan locked. Further changes are disabled.');
+            await fetchExams();
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to lock exam.');
+        }
+    };
+
+    const handleSaveCurrentPlanAsTemplate = async () => {
+        if (!activeExam?.id || !user) return;
+        const name = window.prompt('Template name', `${activeExam.title} Template`);
+        if (!name) return;
+        try {
+            await createSeatingTemplateFromExam(activeExam.id, name, user.id);
+            setFormWarning(`Saved seating plan as template "${name}".`);
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to save seating template.');
+        }
+    };
+
+    const handleLoadVersionHistory = async () => {
+        if (!activeExam?.id) return;
+        try {
+            const versions = await getExamVersionHistory(activeExam.id);
+            setVersionHistory(versions);
+            if (!versions.length) {
+                setFormWarning('No version history available yet.');
+            }
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to load version history.');
+        }
+    };
+
+    const handleRestoreVersion = async (versionId: string) => {
+        if (!activeExam?.id || !user) return;
+        try {
+            const saved = await restoreExamVersion(activeExam.id, versionId, user.id);
+            setActiveExam(saved as FormExam);
+            await fetchExams();
+            await handleLoadVersionHistory();
+            setFormWarning('Version restored successfully.');
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to restore version.');
+        }
     };
 
     const handleDownloadPng = async (hallId: string, hallName: string) => {
@@ -1328,6 +1431,7 @@ const TeacherDashboard: React.FC = () => {
         }); // Deep copy and ensure fields exist
         setFormError('');
         setFormWarning('');
+        setVersionHistory([]);
         
         // Update seat dimensions based on the selected exam's register numbers
         const { width, height, fontSize } = getSeatSizeFromRegisterNumbers(exam.studentSets);
@@ -1737,7 +1841,7 @@ const TeacherDashboard: React.FC = () => {
                                         <p className="text-sm text-gray-500 dark:text-gray-400">Enter the basic details for your exam</p>
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Exam Title</label>
                                         <Input 
@@ -1756,6 +1860,22 @@ const TeacherDashboard: React.FC = () => {
                                             onChange={e => handleFormChange('date', e.target.value)}
                                         />
                                     </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Session</label>
+                                        <select value={activeExam.session || 'Morning'} onChange={e => handleFormChange('session', e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 transition dark:bg-slate-700 dark:border-slate-600 dark:text-slate-200 font-medium">
+                                            <option value="Morning">Morning</option>
+                                            <option value="Afternoon">Afternoon</option>
+                                            <option value="Evening">Evening</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Start Time</label>
+                                        <Input id="exam-start-time" type="time" value={activeExam.startTime || ''} onChange={e => handleFormChange('startTime', e.target.value)} />
+                                    </div>
+                                </div>
+                                <div className="mt-4 flex items-center gap-2">
+                                    <input id="autoDeleteSeatingAfterExam" type="checkbox" checked={activeExam.autoDeleteSeatingAfterExam ?? true} onChange={e => setActiveExam(prev => prev ? { ...prev, autoDeleteSeatingAfterExam: e.target.checked } : null)} />
+                                    <label htmlFor="autoDeleteSeatingAfterExam" className="text-sm text-gray-700 dark:text-gray-300">Auto delete seating one day after the exam date</label>
                                 </div>
                             </Card>
                             
@@ -2353,7 +2473,7 @@ const TeacherDashboard: React.FC = () => {
                                                             <Button 
                                                                 variant="outline" 
                                                                 size="sm"
-                                                                disabled={isInvalid || isFromExcel}
+                                                                disabled={isInvalid}
                                                                 onClick={() => handleSaveSetAsTemplate(set)}
                                                                 className="flex items-center gap-2"
                                                             >
@@ -2556,7 +2676,7 @@ const TeacherDashboard: React.FC = () => {
                                         onClick={handleSave} 
                                         variant="outline"
                                         className="flex-1 !py-4 text-base font-semibold"
-                                        disabled={isLoading || !isDirty}
+                                        disabled={isLoading || !isDirty || activeExam.status === 'LOCKED'}
                                     >
                                         {isLoading ? (
                                             <span className="flex items-center justify-center gap-2">
@@ -2569,7 +2689,7 @@ const TeacherDashboard: React.FC = () => {
                                         onClick={handleGeneratePlan} 
                                         variant="primary" 
                                         className="flex-1 !py-4 text-base font-semibold"
-                                        disabled={isLoading}
+                                        disabled={isLoading || activeExam.status === 'LOCKED'}
                                     >
                                         {isLoading ? (
                                             <span className="flex items-center justify-center gap-2">
@@ -2579,6 +2699,29 @@ const TeacherDashboard: React.FC = () => {
                                         ) : 'Generate Seating Plan'}
                                     </Button>
                                 </div>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-4">
+                                    <Button variant="outline" onClick={handleValidateCurrentExam} disabled={!activeExam.id || isLoading}>Validate</Button>
+                                    <Button variant="primary" onClick={handlePublishCurrentExam} disabled={!activeExam.id || isLoading || activeExam.status === 'LOCKED'}>Publish</Button>
+                                    <Button variant="outline" onClick={handleLockCurrentExam} disabled={!activeExam.id || isLoading || activeExam.status !== 'PUBLISHED'}>Lock</Button>
+                                    <Button variant="outline" onClick={handleSaveCurrentPlanAsTemplate} disabled={!activeExam.id || isLoading || !activeExam.seatingPlan}>Save Template</Button>
+                                    <Button variant="outline" onClick={handleLoadVersionHistory} disabled={!activeExam.id || isLoading}>Versions</Button>
+                                </div>
+                                {activeExam.validationReport && (
+                                    <div className="mt-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/20">
+                                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Validation: {activeExam.validationReport.isValid ? 'Ready to publish' : 'Fix issues before publish'}</p>
+                                        <p className="text-xs text-slate-500 mt-1">Errors: {activeExam.validationReport.errors.length} • Warnings: {activeExam.validationReport.warnings.length}</p>
+                                    </div>
+                                )}
+                                {versionHistory.length > 0 && (
+                                    <div className="mt-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/20 space-y-2">
+                                        {versionHistory.slice(0, 5).map(version => (
+                                            <div key={version.id} className="flex items-center justify-between text-xs">
+                                                <span className="text-slate-600 dark:text-slate-300">Version {version.versionNumber} • {new Date(version.createdAt).toLocaleString()}</span>
+                                                <Button size="sm" variant="outline" onClick={() => handleRestoreVersion(version.id)} disabled={activeExam.status === 'LOCKED'}>Restore</Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -2720,13 +2863,15 @@ const TeacherDashboard: React.FC = () => {
                                                         {exam.date}
                                                     </span>
                                                     <span>•</span>
+                                                    <span>{exam.session || 'Morning'}{exam.startTime ? ` • ${exam.startTime}` : ''}</span>
+                                                    <span>•</span>
                                                     <span>Created by: {getCreatorName(exam.createdBy)}</span>
                                                 </div>
                                             </div>
                                         </div>
                                         <div className="flex flex-wrap gap-2 mt-4">
                                             <span className={`px-3 py-1 rounded-full text-xs font-medium ${exam.seatingPlan ? 'bg-green-100 text-green-800 dark:bg-green-500/20 dark:text-green-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'}`}>
-                                                {exam.seatingPlan ? '✓ Plan Generated' : '⏱️ Pending Plan'}
+                                                {exam.status || (exam.seatingPlan ? 'GENERATED' : 'DRAFT')}
                                             </span>
                                             <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
                                                 {exam.halls.length} Hall{exam.halls.length !== 1 ? 's' : ''}

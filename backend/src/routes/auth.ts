@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createAdminUser, createTeacherUser, findUserByEmail, loginStudent, persistDb } from "../services/examService";
+import { createAdminUser, createTeacherUser, findUserByEmail, loginStudent, persistDb, resetUserPassword } from "../services/examService";
 import { clearOtp, generateOtp, setOtp, verifyOtp } from "../utils/otpStore";
 import { sendOtpMail } from "../utils/mailer";
 import { sanitizeUser } from "../utils/sanitize";
@@ -20,11 +20,11 @@ router.post("/request-otp", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials." });
     }
     if ((user.role === "ADMIN" || user.role === "TEACHER") && !user.permissionGranted) {
-      return res.status(403).json({ error: user.role === "ADMIN" ? "Account Pending: A Super Admin must approve your institutional registration." : "Account Pending: Your institutional administrator must grant you permission." });
+      return res.status(403).json({ error: user.role === "ADMIN" ? `Account ${user.approvalStatus || 'Pending'}: ${user.approvalReason || 'A Super Admin must approve your institutional registration.'}` : `Account ${user.approvalStatus || 'Pending'}: ${user.approvalReason || 'Your institutional administrator must grant you permission.'}` });
     }
 
     const otp = generateOtp();
-    await setOtp(user.email, otp);
+    await setOtp(user.email, otp, 'LOGIN');
     await sendOtpMail(user.email, otp);
     return res.json({ success: true });
   } catch (error: any) {
@@ -44,10 +44,11 @@ router.post("/verify-otp", async (req, res) => {
 
     const user = await findUserByEmail(email);
     if (!user || String(user.password ?? "").trim() !== password) {
-      await clearOtp(email);
+      await clearOtp(email, 'LOGIN');
       return res.status(401).json({ error: "Invalid credentials." });
     }
-    if (!(await verifyOtp(email, otp))) return res.status(401).json({ error: "Invalid or expired verification code." });
+    const verified = await verifyOtp(email, otp, 'LOGIN');
+    if (!verified.valid) return res.status(401).json({ error: "Invalid or expired verification code." });
 
     return res.json({ user: sanitizeUser(user) });
   } catch (error: any) {
@@ -93,6 +94,43 @@ router.post("/student-login", async (req, res) => {
     return res.json({ user: sanitizeUser(user) });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "Unable to log in student." });
+  }
+});
+
+router.post('/request-password-reset', async (req, res) => {
+  try {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const newPassword = String(req.body?.newPassword ?? '').trim();
+    if (!email || !newPassword) return res.status(400).json({ error: 'Email and new password are required.' });
+    if (newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+    const user = await findUserByEmail(email);
+    if (!user || !['ADMIN', 'TEACHER'].includes(user.role)) {
+      return res.status(404).json({ error: 'Admin or teacher account not found.' });
+    }
+    const otp = generateOtp();
+    await setOtp(user.email, otp, 'PASSWORD_RESET', { newPassword });
+    await sendOtpMail(user.email, otp);
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Unable to send password reset code.' });
+  }
+});
+
+router.post('/verify-password-reset', async (req, res) => {
+  try {
+    const email = String(req.body?.email ?? '').trim().toLowerCase();
+    const otp = String(req.body?.otp ?? '').trim();
+    if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required.' });
+    const verified = await verifyOtp(email, otp, 'PASSWORD_RESET');
+    if (!verified.valid || !verified.payload?.newPassword) {
+      return res.status(401).json({ error: 'Invalid or expired verification code.' });
+    }
+    const updated = await resetUserPassword(email, String(verified.payload.newPassword));
+    if (!updated) return res.status(404).json({ error: 'Account not found.' });
+    await persistDb();
+    return res.json({ success: true });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message || 'Unable to reset password.' });
   }
 });
 

@@ -1,7 +1,7 @@
 
 import React, { createContext, useState, useContext, ReactNode } from 'react';
 import { User, Role } from '../types';
-import { requestLoginOtp as apiRequestLoginOtp, verifyLoginOtp as apiVerifyLoginOtp, logout as apiLogout, loginStudent as apiLoginStudent, registerTeacher as apiRegisterTeacher, registerAdmin as apiRegisterAdmin } from '../services/authService';
+import { requestLoginOtp as apiRequestLoginOtp, verifyLoginOtp as apiVerifyLoginOtp, logout as apiLogout, loginStudent as apiLoginStudent, registerTeacher as apiRegisterTeacher, registerAdmin as apiRegisterAdmin, requestPasswordResetOtp as apiRequestPasswordResetOtp, verifyPasswordResetOtp as apiVerifyPasswordResetOtp } from '../services/authService';
 
 interface AuthContextType {
     user: User | null;
@@ -12,6 +12,8 @@ interface AuthContextType {
     loginStudent: (registerNumber: string, adminId: string) => Promise<User | null>;
     registerTeacher: (name: string, email: string, password: string, adminIdentifier: string) => Promise<User | null>;
     registerAdmin: (name: string, email: string, password: string, institutionName: string) => Promise<User | null>;
+    requestPasswordResetOtp: (email: string, newPassword: string) => Promise<void>;
+    verifyPasswordResetOtp: (email: string, otp: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -56,6 +58,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return newUser;
     };
 
+    const requestPasswordResetOtp = async (email: string, newPassword: string): Promise<void> => {
+        await apiRequestPasswordResetOtp(email, newPassword);
+    };
+
+    const verifyPasswordResetOtp = async (email: string, otp: string): Promise<void> => {
+        await apiVerifyPasswordResetOtp(email, otp);
+    };
+
     const loginStudent = async (registerNumber: string, adminId: string): Promise<User | null> => {
         const loggedInUser = await apiLoginStudent(registerNumber, adminId);
         if (loggedInUser) {
@@ -74,7 +84,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const isAuthenticated = !!user;
 
     return (
-        <AuthContext.Provider value={{ user, isAuthenticated, requestLoginOtp, verifyLoginOtp, logout, loginStudent, registerTeacher, registerAdmin }}>
+        <AuthContext.Provider value={{ user, isAuthenticated, requestLoginOtp, verifyLoginOtp, logout, loginStudent, registerTeacher, registerAdmin, requestPasswordResetOtp, verifyPasswordResetOtp }}>
             {children}
         </AuthContext.Provider>
     );

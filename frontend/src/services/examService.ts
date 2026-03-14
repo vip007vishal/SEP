@@ -1,15 +1,15 @@
-import { Hall, StudentSet, SeatingPlan, User, HallTemplate, StudentSetTemplate, SeatDefinition, AuditLog, Exam, Role } from "../types";
+import { Hall, StudentSet, SeatingPlan, User, HallTemplate, StudentSetTemplate, SeatDefinition, AuditLog, Exam, Role, SeatingPlanTemplate, SeatingPlanVersion, ValidationReport } from "../types";
 import { apiRpc } from "../lib/api";
 
 export const getAuditLogs = (adminId: string): Promise<AuditLog[]> => apiRpc("getAuditLogs", adminId);
 export const getAllAdmins = (): Promise<User[]> => apiRpc("getAllAdmins");
-export const grantAdminPermission = (adminId: string): Promise<User | undefined> => apiRpc("grantAdminPermission", adminId);
+export const grantAdminPermission = (adminId: string, reason?: string): Promise<User | undefined> => apiRpc("grantAdminPermission", adminId, reason);
 export const deleteAdminAndInstitution = (adminId: string): Promise<boolean> => apiRpc("deleteAdminAndInstitution", adminId);
 export const getInstitutions = (): Promise<{ id: string; name: string }[]> => apiRpc("getInstitutions");
 export const findUserById = (id: string): Promise<User | undefined> => apiRpc("findUserById", id);
 export const getTeachersForAdmin = (adminId: string): Promise<User[]> => apiRpc("getTeachersForAdmin", adminId);
 export const getUnassignedTeachers = (): Promise<User[]> => apiRpc("getUnassignedTeachers");
-export const grantTeacherPermission = (teacherId: string, adminId: string): Promise<User | undefined> => apiRpc("grantTeacherPermission", teacherId, adminId);
+export const grantTeacherPermission = (teacherId: string, adminId: string, reason?: string): Promise<User | undefined> => apiRpc("grantTeacherPermission", teacherId, adminId, reason);
 export const revokeTeacherPermission = (teacherId: string): Promise<User | undefined> => apiRpc("revokeTeacherPermission", teacherId);
 export const deleteTeacher = (teacherId: string, adminId: string): Promise<boolean> => apiRpc("deleteTeacher", teacherId, adminId);
 export const getExamsForAdmin = (adminId: string): Promise<Exam[]> => apiRpc("getExamsForAdmin", adminId);
@@ -32,3 +32,16 @@ export const deleteStudentSetTemplate = (templateId: string, deleterId: string, 
 export const generateClassicSeatingPlan = (examData: { halls: Hall[]; studentSets: StudentSet[]; seatingType?: "normal" | "fair" }): Promise<{ plan: SeatingPlan | null; message?: string }> => apiRpc("generateClassicSeatingPlan", examData);
 export const generateSeatingPlan = (examData: { halls: Hall[]; studentSets: StudentSet[]; rules: string; seatingType: "normal" | "fair"; editorMode: "ai" | "classic" | "advanced" | "ai-advanced" }): Promise<{ plan: SeatingPlan | null; message?: string }> => apiRpc("generateSeatingPlan", examData);
 export const generateLayoutFromImage = (base64Image: string, mimeType: string): Promise<{ layout: SeatDefinition[]; rows: number; cols: number } | null> => apiRpc("generateLayoutFromImage", base64Image, mimeType);
+
+
+export const rejectAdminRequest = (adminId: string, reason: string): Promise<User | undefined> => apiRpc("rejectAdminRequest", adminId, reason);
+export const rejectTeacherPermission = (teacherId: string, adminId: string, reason: string): Promise<User | undefined> => apiRpc("rejectTeacherPermission", teacherId, adminId, reason);
+export const getSeatingTemplatesForTeacher = (teacherId: string): Promise<SeatingPlanTemplate[]> => apiRpc("getSeatingTemplatesForTeacher", teacherId);
+export const getSeatingTemplatesForAdmin = (adminId: string): Promise<SeatingPlanTemplate[]> => apiRpc("getSeatingTemplatesForAdmin", adminId);
+export const createSeatingTemplateFromExam = (examId: string, name: string, creatorId: string, description?: string): Promise<SeatingPlanTemplate> => apiRpc("createSeatingTemplateFromExam", examId, name, creatorId, description);
+export const applySeatingTemplateToExam = (templateId: string, examId: string, actorId: string): Promise<Exam> => apiRpc("applySeatingTemplateToExam", templateId, examId, actorId);
+export const getExamVersionHistory = (examId: string): Promise<SeatingPlanVersion[]> => apiRpc("getExamVersionHistory", examId);
+export const restoreExamVersion = (examId: string, versionId: string, actorId: string): Promise<Exam> => apiRpc("restoreExamVersion", examId, versionId, actorId);
+export const validateExamForPublish = (examId: string): Promise<ValidationReport> => apiRpc("validateExamForPublish", examId);
+export const publishExam = (examId: string, actorId: string): Promise<Exam> => apiRpc("publishExam", examId, actorId);
+export const lockExam = (examId: string, actorId: string): Promise<Exam> => apiRpc("lockExam", examId, actorId);

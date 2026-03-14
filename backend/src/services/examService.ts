@@ -1,7 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { DbData, loadDb, saveDb } from '../store/db';
 import { env } from '../utils/env';
-import { AuditLog, Exam, Hall, HallTemplate, Institute, Role, Seat, SeatAssignment, SeatDefinition, SeatingPlan, StudentInfo, StudentSet, StudentSetTemplate, User } from '../types';
+import { ApprovalStatus, AuditLog, Exam, ExamSession, ExamStatus, Hall, HallTemplate, Institute, Role, Seat, SeatAssignment, SeatDefinition, SeatingPlan, SeatingPlanTemplate, SeatingPlanVersion, StudentInfo, StudentSet, StudentSetTemplate, User, ValidationIssue, ValidationReport } from '../types';
 
 let db: DbData = {
   users: [],
@@ -11,6 +11,8 @@ let db: DbData = {
   studentSetTemplates: [],
   seatAssignments: [],
   auditLogs: [],
+  seatingPlanVersions: [],
+  seatingTemplates: [],
 };
 
 const API_LATENCY = 0;
@@ -19,6 +21,38 @@ const nextId = (prefix: string) => `${prefix}${Date.now()}${Math.random().toStri
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizeText = (value: string) => value.trim();
 const normalizeRoll = (value: string) => value.trim().toLowerCase();
+
+const examStatusOrder: ExamStatus[] = ['DRAFT', 'GENERATED', 'PUBLISHED', 'LOCKED'];
+const purgeExpiredSeatingData = async () => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 1);
+  let changed = false;
+  db.exams = db.exams.map((exam) => {
+    if (!exam.autoDeleteSeatingAfterExam || !exam.seatingPlan) return exam;
+    const examDate = new Date(exam.date);
+    if (Number.isNaN(examDate.getTime()) || examDate > cutoff) return exam;
+    changed = true;
+    return {
+      ...exam,
+      seatingPlan: undefined,
+      status: exam.status === 'LOCKED' ? 'LOCKED' : 'DRAFT',
+      validationReport: undefined,
+    };
+  });
+  if (changed) {
+    db.seatAssignments = db.seatAssignments.filter((assignment) => {
+      const exam = db.exams.find((candidate) => candidate.id === assignment.examId);
+      return !!exam?.seatingPlan;
+    });
+    await saveDb(db);
+  }
+};
+const createValidationReport = (errors: ValidationIssue[], warnings: ValidationIssue[] = []): ValidationReport => ({
+  generatedAt: new Date().toISOString(),
+  isValid: errors.length === 0,
+  errors,
+  warnings,
+});
 
 export const initExamService = async () => {
   db = await loadDb();
@@ -45,7 +79,13 @@ export const initExamService = async () => {
   db.exams = db.exams.map((exam) => ({
     ...exam,
     instituteId: exam.instituteId || getAdminById(exam.adminId)?.instituteId,
+    session: exam.session || 'Morning',
+    status: exam.status || (exam.seatingPlan ? 'GENERATED' : 'DRAFT'),
+    seatingPlanVersion: exam.seatingPlanVersion || 0,
+    autoDeleteSeatingAfterExam: exam.autoDeleteSeatingAfterExam ?? false,
   }));
+  db.seatingPlanVersions = db.seatingPlanVersions || [];
+  db.seatingTemplates = db.seatingTemplates || [];
 
   const rebuiltAssignments: typeof db.seatAssignments = [];
   for (const exam of db.exams) {
@@ -57,6 +97,7 @@ export const initExamService = async () => {
     db.seatAssignments = rebuiltAssignments;
   }
 
+  await purgeExpiredSeatingData();
   await saveDb(db);
 };
 
@@ -119,6 +160,8 @@ const buildSeatAssignmentsForExam = (exam: Exam): SeatAssignment[] => {
           examId: exam.id,
           examTitle: exam.title,
           examDate: exam.date,
+          session: exam.session,
+          startTime: exam.startTime,
           studentRollNo: String(seat.student.id).trim(),
           studentName: seat.student.id,
           hallId: resolvedHallId,
@@ -139,6 +182,93 @@ const replaceSeatAssignmentsForExam = (exam: Exam) => {
   if (exam.seatingPlan) {
     db.seatAssignments.push(...buildSeatAssignmentsForExam(exam));
   }
+};
+
+const saveExamVersion = (exam: Exam, createdBy: string, notes?: string) => {
+  if (!exam.seatingPlan) return;
+  const nextVersion = (db.seatingPlanVersions.filter((version) => version.examId === exam.id).reduce((max, version) => Math.max(max, version.versionNumber), 0)) + 1;
+  exam.seatingPlanVersion = nextVersion;
+  db.seatingPlanVersions.unshift({
+    id: nextId('ver_'),
+    examId: exam.id,
+    versionNumber: nextVersion,
+    seatingPlan: JSON.parse(JSON.stringify(exam.seatingPlan)),
+    validationReport: exam.validationReport,
+    createdBy,
+    createdAt: new Date().toISOString(),
+    notes,
+  });
+};
+
+const validateExamState = (exam: Exam): ValidationReport => {
+  const errors: ValidationIssue[] = [];
+  const warnings: ValidationIssue[] = [];
+  const seenStudents = new Set<string>();
+  const seenSeats = new Set<string>();
+  const allStudents = new Set<string>();
+
+  for (const set of exam.studentSets || []) {
+    for (const student of set.students || []) {
+      const key = normalizeRoll(student);
+      if (allStudents.has(key)) {
+        errors.push({ code: 'DUPLICATE_ROLL', level: 'error', message: `Duplicate roll number found in templates: ${student}` });
+      }
+      allStudents.add(key);
+    }
+  }
+
+  for (const hall of exam.halls || []) {
+    if (!hall.layout?.length) {
+      errors.push({ code: 'HALL_LAYOUT_EMPTY', level: 'error', message: `Hall ${hall.name} has no layout.` });
+    }
+  }
+
+  if (exam.seatingPlan) {
+    for (const [hallId, rows] of Object.entries(exam.seatingPlan)) {
+      const hall = exam.halls.find((candidate) => candidate.id === hallId || candidate.name === hallId);
+      if (!hall) {
+        warnings.push({ code: 'UNKNOWN_HALL', level: 'warning', message: `Seating plan contains unknown hall ${hallId}.` });
+        continue;
+      }
+      const allowedSeats = hall.layout.length;
+      let usedSeats = 0;
+      rows.forEach((row, rowIndex) => row.forEach((seat, colIndex) => {
+        if (!seat?.student) return;
+        usedSeats += 1;
+        const studentKey = normalizeRoll(String(seat.student.id));
+        const seatKey = `${hall.id}:${rowIndex}:${colIndex}`;
+        if (seenStudents.has(studentKey)) {
+          errors.push({ code: 'DUPLICATE_STUDENT', level: 'error', message: `Student ${seat.student.id} assigned more than once.` });
+        }
+        if (seenSeats.has(seatKey)) {
+          errors.push({ code: 'DUPLICATE_SEAT', level: 'error', message: `Seat ${seatKey} assigned more than once.` });
+        }
+        seenStudents.add(studentKey);
+        seenSeats.add(seatKey);
+      }));
+      if (usedSeats > allowedSeats) {
+        errors.push({ code: 'HALL_CAPACITY', level: 'error', message: `Hall ${hall.name} exceeds capacity.` });
+      }
+    }
+  } else {
+    warnings.push({ code: 'NO_SEATING_PLAN', level: 'warning', message: 'No seating plan generated yet.' });
+  }
+
+  const missingStudents = [...allStudents].filter((student) => !seenStudents.has(student));
+  if (missingStudents.length > 0) {
+    errors.push({ code: 'UNASSIGNED_STUDENTS', level: 'error', message: `${missingStudents.length} students are not assigned seats.` });
+  }
+
+  const overlappingExams = db.exams.filter((candidate) => candidate.id !== exam.id && candidate.date === exam.date && candidate.session === exam.session && candidate.adminId === exam.adminId);
+  overlappingExams.forEach((candidate) => {
+    const currentHallIds = new Set((exam.halls || []).map((hall) => hall.id));
+    const overlap = (candidate.halls || []).find((hall) => currentHallIds.has(hall.id));
+    if (overlap) {
+      errors.push({ code: 'OVERLAPPING_HALL', level: 'error', message: `Hall ${overlap.name} is already used by exam ${candidate.title} in the same session.` });
+    }
+  });
+
+  return createValidationReport(errors, warnings);
 };
 
 const adminContextForUser = (user?: User | null) => {
@@ -166,11 +296,13 @@ export const getAllAdmins = async (): Promise<User[]> => {
   return db.users.filter((u) => u.role === Role.ADMIN).sort((a, b) => (a.institutionName || '').localeCompare(b.institutionName || ''));
 };
 
-export const grantAdminPermission = async (adminId: string): Promise<User | undefined> => {
+export const grantAdminPermission = async (adminId: string, reason?: string): Promise<User | undefined> => {
   await delay();
   const admin = getAdminById(adminId);
   if (!admin) return undefined;
   admin.permissionGranted = true;
+  admin.approvalStatus = 'APPROVED';
+  admin.approvalReason = reason || 'approved successfully';
   const instituteId = ensureInstitute(admin);
   const institute = getInstituteById(instituteId);
   if (institute) {
@@ -179,6 +311,19 @@ export const grantAdminPermission = async (adminId: string): Promise<User | unde
     institute.name = admin.institutionName || institute.name;
   }
   logActivity('SYSTEM', env.superAdminName, Role.SUPER_ADMIN, 'GRANT_ADMIN_ACCESS', `Approved institution admin: ${admin.institutionName}`);
+  return { ...admin };
+};
+
+export const rejectAdminRequest = async (adminId: string, reason: string): Promise<User | undefined> => {
+  await delay();
+  const admin = getAdminById(adminId);
+  if (!admin) return undefined;
+  admin.permissionGranted = false;
+  admin.approvalStatus = 'REJECTED';
+  admin.approvalReason = reason || 'rejected';
+  const institute = getInstituteById(admin.instituteId);
+  if (institute) institute.isActive = false;
+  logActivity('SYSTEM', env.superAdminName, Role.SUPER_ADMIN, 'REJECT_ADMIN_ACCESS', `Rejected institution admin: ${admin.institutionName}`);
   return { ...admin };
 };
 
@@ -195,6 +340,8 @@ export const deleteAdminAndInstitution = async (adminId: string): Promise<boolea
   db.seatAssignments = db.seatAssignments.filter((a) => a.instituteId !== instituteId);
   db.auditLogs = db.auditLogs.filter((l) => l.adminId !== adminId && l.adminId !== instituteId);
   db.institutes = db.institutes.filter((i) => i.id !== instituteId && i.adminId !== adminId);
+  db.seatingPlanVersions = db.seatingPlanVersions.filter((v) => db.exams.some((e) => e.id === v.examId));
+  db.seatingTemplates = db.seatingTemplates.filter((t) => t.adminId !== adminId && t.instituteId !== instituteId);
 
   logActivity('SYSTEM', env.superAdminName, Role.SUPER_ADMIN, 'DELETE_INSTITUTION', `Deleted institution and all data for ${admin.institutionName}`);
   return true;
@@ -218,6 +365,17 @@ export const findUserById = async (id: string): Promise<User | undefined> => {
   return db.users.find((u) => u.id === id);
 };
 
+
+export const resetUserPassword = async (email: string, newPassword: string): Promise<User | undefined> => {
+  await delay();
+  const user = db.users.find((candidate) => normalizeEmail(candidate.email) === normalizeEmail(email) && ['ADMIN', 'TEACHER'].includes(candidate.role));
+  if (!user) return undefined;
+  user.password = newPassword.trim();
+  logActivity(user.adminId || user.id, user.name, user.role, 'RESET_PASSWORD', `Password reset completed for ${user.email}`);
+  return { ...user };
+};
+
+
 export const createAdminUser = async (name: string, email: string, password: string, institutionName: string): Promise<User | null> => {
   await delay();
   const normalizedEmail = normalizeEmail(email);
@@ -236,6 +394,8 @@ export const createAdminUser = async (name: string, email: string, password: str
     institutionName: normalizedInstitution,
     permissionGranted: false,
     instituteId,
+    approvalStatus: 'PENDING',
+    approvalReason: 'pending for verification',
   };
   db.users.push(newAdmin);
   db.institutes.push({ id: instituteId, name: normalizedInstitution, adminId: newAdmin.id, isActive: false, createdAt: new Date().toISOString() });
@@ -265,6 +425,8 @@ export const createTeacherUser = async (name: string, email: string, password: s
     permissionGranted: false,
     adminId: admin.id,
     instituteId,
+    approvalStatus: 'PENDING',
+    approvalReason: 'pending for verification',
   };
   db.users.push(newTeacher);
   logActivity(admin.id, newTeacher.name, Role.TEACHER, 'REGISTER_TEACHER', `Teacher ${newTeacher.name} requested access.`);
@@ -281,7 +443,7 @@ export const getUnassignedTeachers = async (): Promise<User[]> => {
   return db.users.filter((u) => u.role === Role.TEACHER && !u.permissionGranted).sort((a, b) => a.name.localeCompare(b.name));
 };
 
-export const grantTeacherPermission = async (teacherId: string, adminId: string): Promise<User | undefined> => {
+export const grantTeacherPermission = async (teacherId: string, adminId: string, reason?: string): Promise<User | undefined> => {
   await delay();
   const teacher = db.users.find((u) => u.id === teacherId && u.role === Role.TEACHER);
   const admin = getAdminById(adminId);
@@ -290,7 +452,23 @@ export const grantTeacherPermission = async (teacherId: string, adminId: string)
   teacher.permissionGranted = true;
   teacher.adminId = adminId;
   teacher.instituteId = instituteId;
+  teacher.approvalStatus = 'APPROVED';
+  teacher.approvalReason = reason || 'approved successfully';
   logActivity(adminId, admin.name, Role.ADMIN, 'GRANTED_PERMISSION', `Approved teacher account: ${teacher.name}`);
+  return { ...teacher };
+};
+
+export const rejectTeacherPermission = async (teacherId: string, adminId: string, reason: string): Promise<User | undefined> => {
+  await delay();
+  const teacher = db.users.find((u) => u.id === teacherId && u.role === Role.TEACHER);
+  const admin = getAdminById(adminId);
+  if (!teacher || !admin) return undefined;
+  teacher.permissionGranted = false;
+  teacher.approvalStatus = 'REJECTED';
+  teacher.approvalReason = reason || 'rejected';
+  teacher.adminId = adminId;
+  teacher.instituteId = ensureInstitute(admin);
+  logActivity(adminId, admin.name, Role.ADMIN, 'REJECTED_PERMISSION', `Rejected teacher account: ${teacher.name}`);
   return { ...teacher };
 };
 
@@ -299,6 +477,8 @@ export const revokeTeacherPermission = async (teacherId: string): Promise<User |
   const teacher = db.users.find((u) => u.id === teacherId && u.role === Role.TEACHER);
   if (!teacher) return undefined;
   teacher.permissionGranted = false;
+  teacher.approvalStatus = 'PENDING';
+  teacher.approvalReason = 'pending for verification';
   if (teacher.adminId) {
     const admin = getAdminById(teacher.adminId);
     logActivity(teacher.adminId, admin?.name || 'Admin', Role.ADMIN, 'REVOKED_PERMISSION', `Revoked teacher permission: ${teacher.name}`);
@@ -315,6 +495,8 @@ export const deleteTeacher = async (teacherId: string, adminId: string): Promise
   db.seatAssignments = db.seatAssignments.filter((assignment) => !removedExamIds.includes(assignment.examId));
   db.hallTemplates = db.hallTemplates.filter((t) => t.createdBy !== teacherId);
   db.studentSetTemplates = db.studentSetTemplates.filter((t) => t.createdBy !== teacherId);
+  db.seatingPlanVersions = db.seatingPlanVersions.filter((v) => !removedExamIds.includes(v.examId));
+  db.seatingTemplates = db.seatingTemplates.filter((t) => t.createdBy !== teacherId);
   if (before !== db.users.length) {
     logActivity(adminId, getAdminById(adminId)?.name || 'Admin', Role.ADMIN, 'DELETED_TEACHER', `Deleted teacher account ${teacherId}`);
     return true;
@@ -324,11 +506,13 @@ export const deleteTeacher = async (teacherId: string, adminId: string): Promise
 
 export const getExamsForAdmin = async (adminId: string): Promise<Exam[]> => {
   await delay();
+  await purgeExpiredSeatingData();
   return db.exams.filter((e) => e.adminId === adminId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 
 export const getExamsForStudent = async (registerNumber: string, instituteId: string): Promise<Exam[]> => {
   await delay();
+  await purgeExpiredSeatingData();
   const normalizedInstituteId = normalizeText(instituteId);
   const normalizedRoll = normalizeRoll(registerNumber);
   const matchingAssignments = db.seatAssignments.filter(
@@ -336,39 +520,56 @@ export const getExamsForStudent = async (registerNumber: string, instituteId: st
   );
   const examIds = new Set(matchingAssignments.map((assignment) => assignment.examId));
   return db.exams
-    .filter((exam) => exam.instituteId === normalizedInstituteId && examIds.has(exam.id) && !!exam.seatingPlan)
+    .filter((exam) => exam.instituteId === normalizedInstituteId && examIds.has(exam.id) && !!exam.seatingPlan && ['PUBLISHED', 'LOCKED'].includes(exam.status || 'DRAFT'))
     .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 
 export const getExamsForTeacher = async (teacherId: string): Promise<Exam[]> => {
   await delay();
+  await purgeExpiredSeatingData();
   return db.exams.filter((e) => e.createdBy === teacherId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 
 export const createExam = async (examData: any, teacherId: string): Promise<Exam> => {
   await delay();
   const teacher = await findUserById(teacherId);
-  const { adminId, instituteId } = adminContextForUser(teacher);
-  if (!teacher || !adminId || !instituteId) throw new Error('Teacher not assigned.');
+  if (!teacher || !teacher.adminId) throw new Error("Teacher not assigned.");
+
+  const teacherContext = adminContextForUser(teacher);
   const timestamp = Date.now();
+
   const newExam: Exam = {
     ...examData,
-    id: examData.id || `exam${timestamp}`,
-    title: normalizeText(examData.title || 'Untitled Exam'),
-    date: normalizeText(examData.date || ''),
+    id: `exam${timestamp}`,
     createdBy: teacherId,
-    adminId,
-    instituteId,
-    halls: (examData.halls || []).map((h: any, i: number) => ({ ...h, id: h.id || `hall${timestamp}${i}`, instituteId })),
-    studentSets: (examData.studentSets || []).map((s: any, i: number) => ({ ...s, id: s.id || `set${timestamp}${i}`, instituteId })),
+    adminId: teacherContext.adminId,
+    instituteId: examData.instituteId || teacherContext.instituteId,
+    session: examData.session || 'Morning',
+    startTime: examData.startTime || '',
+    status: examData.status || (examData.seatingPlan ? 'GENERATED' : 'DRAFT'),
+    publishedAt: examData.publishedAt,
+    lockedAt: examData.lockedAt,
+    validationReport: examData.validationReport,
+    seatingPlanVersion: examData.seatingPlanVersion || 0,
+    autoDeleteSeatingAfterExam: examData.autoDeleteSeatingAfterExam ?? false,
+    sourceTemplateId: examData.sourceTemplateId,
+    halls: (examData.halls || []).map((h: any, i: number) => ({ ...h, id: h.id || `hall${timestamp}${i}`, instituteId: examData.instituteId || teacherContext.instituteId })),
+    studentSets: (examData.studentSets || []).map((s: any, i: number) => ({ ...s, id: s.id || `set${timestamp}${i}`, instituteId: examData.instituteId || teacherContext.instituteId })),
     seatingPlan: examData.seatingPlan || undefined,
   };
-  db.exams.push(newExam);
+
+  if (newExam.seatingPlan) {
+    newExam.validationReport = validateExamState(newExam);
+    newExam.status = newExam.validationReport.isValid ? 'GENERATED' : 'DRAFT';
+  }
+
+  db.exams = [...db.exams, newExam];
   if (newExam.seatingPlan) {
     replaceSeatAssignmentsForExam(newExam);
+    saveExamVersion(newExam, teacherId, 'Initial generated plan');
   }
-  logActivity(adminId, teacher.name, teacher.role, 'CREATED_EXAM', `Created new exam: "${newExam.title}"`);
-  return newExam;
+  logActivity(teacherContext.adminId, teacher.name, Role.TEACHER, 'CREATED_EXAM', `Created new exam: "${newExam.title}"`);
+  return Promise.resolve(newExam);
 };
 
 export const updateExam = async (updatedExam: Exam): Promise<Exam> => {
@@ -382,10 +583,25 @@ export const updateExam = async (updatedExam: Exam): Promise<Exam> => {
     adminId: updatedExam.adminId || existing.adminId,
     createdBy: updatedExam.createdBy || existing.createdBy,
     instituteId: updatedExam.instituteId || existing.instituteId,
+    session: updatedExam.session || existing.session || 'Morning',
+    status: existing.status === 'LOCKED' ? 'LOCKED' : (updatedExam.status || existing.status || 'DRAFT'),
+    autoDeleteSeatingAfterExam: updatedExam.autoDeleteSeatingAfterExam ?? existing.autoDeleteSeatingAfterExam ?? false,
   };
+  if (merged.seatingPlan) {
+    merged.validationReport = validateExamState(merged);
+    if (merged.status !== 'LOCKED' && merged.status === 'PUBLISHED' && !merged.validationReport.isValid) {
+      merged.status = 'GENERATED';
+    }
+  } else if (merged.status !== 'LOCKED') {
+    merged.status = 'DRAFT';
+  }
+  const seatingChanged = JSON.stringify(existing.seatingPlan || null) !== JSON.stringify(merged.seatingPlan || null);
   db.exams[index] = merged;
   if (merged.seatingPlan) {
     replaceSeatAssignmentsForExam(merged);
+    if (seatingChanged) {
+      saveExamVersion(merged, merged.createdBy, 'Updated seating plan');
+    }
   } else {
     db.seatAssignments = db.seatAssignments.filter((assignment) => assignment.examId !== merged.id);
   }
@@ -397,10 +613,12 @@ export const updateExamSeatingPlan = async (examId: string, newPlan: SeatingPlan
   await delay();
   const exam = db.exams.find((e) => e.id === examId);
   if (!exam) return false;
+  if (exam.status === 'LOCKED') throw new Error('Locked seating plans cannot be modified.');
   exam.seatingPlan = newPlan;
+  exam.validationReport = validateExamState(exam);
+  exam.status = exam.validationReport.isValid ? 'GENERATED' : 'DRAFT';
   replaceSeatAssignmentsForExam(exam);
-  const updater = await findUserById(updaterId);
-  logActivity(exam.adminId, updater?.name || 'Teacher', updater?.role || Role.TEACHER, 'UPDATED_SEATING_PLAN', `Updated seating plan for ${exam.title}`);
+  saveExamVersion(exam, updaterId, 'Manual seating edit');
   return true;
 };
 
@@ -410,6 +628,7 @@ export const deleteExam = async (examId: string, ownerId: string, role: Role): P
   if (!exam) return false;
   db.exams = db.exams.filter((e) => e.id !== examId);
   db.seatAssignments = db.seatAssignments.filter((assignment) => assignment.examId !== examId);
+  db.seatingPlanVersions = db.seatingPlanVersions.filter((version) => version.examId !== examId);
   const actor = await findUserById(ownerId);
   logActivity(exam.adminId, actor?.name || 'User', role, 'DELETED_EXAM', `Deleted exam: "${exam.title}"`);
   return true;
@@ -461,6 +680,7 @@ export const createHallTemplate = async (templateData: any, creatorId: string): 
     createdBy: creatorId,
     adminId,
     instituteId,
+    templateSource: templateData.templateSource || 'manual',
   };
   db.hallTemplates.push(template);
   logActivity(adminId, creator.name, creator.role, 'CREATED_HALL_TEMPLATE', `Created hall template: ${template.name}`);
@@ -517,6 +737,7 @@ export const createStudentSetTemplate = async (templateData: any, creatorId: str
     createdBy: creatorId,
     adminId,
     instituteId,
+    templateSource: templateData.templateSource || (templateData.students ? 'imported' : 'manual'),
   };
   db.studentSetTemplates.push(template);
   logActivity(adminId, creator.name, creator.role, 'CREATED_STUDENT_SET_TEMPLATE', `Created student set template: ${template.subject}`);
@@ -563,6 +784,116 @@ const generateStudentList = (studentSets: StudentSet[]): StudentInfo[] => {
     }
   });
   return allStudents;
+};
+
+
+export const getSeatingTemplatesForTeacher = async (teacherId: string): Promise<SeatingPlanTemplate[]> => {
+  await delay();
+  const teacher = await findUserById(teacherId);
+  const context = adminContextForUser(teacher);
+  return db.seatingTemplates.filter((template) => template.adminId === context.adminId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+};
+
+export const getSeatingTemplatesForAdmin = async (adminId: string): Promise<SeatingPlanTemplate[]> => {
+  await delay();
+  return db.seatingTemplates.filter((template) => template.adminId === adminId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+};
+
+export const createSeatingTemplateFromExam = async (examId: string, name: string, creatorId: string, description?: string): Promise<SeatingPlanTemplate> => {
+  await delay();
+  const exam = db.exams.find((candidate) => candidate.id === examId);
+  if (!exam || !exam.seatingPlan) throw new Error('Exam seating plan not found.');
+  const creator = await findUserById(creatorId);
+  const context = adminContextForUser(creator);
+  const template: SeatingPlanTemplate = {
+    id: nextId('template_'),
+    name: normalizeText(name),
+    description: description?.trim(),
+    createdBy: creatorId,
+    adminId: context.adminId || exam.adminId,
+    instituteId: exam.instituteId,
+    halls: JSON.parse(JSON.stringify(exam.halls || [])),
+    studentSets: JSON.parse(JSON.stringify(exam.studentSets || [])),
+    seatingPlan: JSON.parse(JSON.stringify(exam.seatingPlan)),
+    createdAt: new Date().toISOString(),
+  } as SeatingPlanTemplate;
+  (template as any).sourceExamId = exam.id;
+  db.seatingTemplates.unshift(template);
+  logActivity(context.adminId || exam.adminId, creator?.name || 'User', creator?.role || Role.TEACHER, 'CREATE_SEATING_TEMPLATE', `Saved seating template ${template.name}`);
+  return template;
+};
+
+export const applySeatingTemplateToExam = async (templateId: string, examId: string, actorId: string): Promise<Exam> => {
+  await delay();
+  const template = db.seatingTemplates.find((candidate) => candidate.id === templateId);
+  const exam = db.exams.find((candidate) => candidate.id === examId);
+  if (!template || !exam) throw new Error('Template or exam not found.');
+  if (exam.status === 'LOCKED') throw new Error('Locked seating plans cannot be modified.');
+  exam.halls = JSON.parse(JSON.stringify(template.halls || []));
+  exam.studentSets = JSON.parse(JSON.stringify(template.studentSets || []));
+  exam.seatingPlan = JSON.parse(JSON.stringify(template.seatingPlan));
+  exam.sourceTemplateId = template.id;
+  exam.validationReport = validateExamState(exam);
+  exam.status = exam.validationReport.isValid ? 'GENERATED' : 'DRAFT';
+  replaceSeatAssignmentsForExam(exam);
+  saveExamVersion(exam, actorId, `Applied template ${template.name}`);
+  return exam;
+};
+
+export const getExamVersionHistory = async (examId: string): Promise<SeatingPlanVersion[]> => {
+  await delay();
+  return db.seatingPlanVersions.filter((version) => version.examId === examId).sort((a, b) => b.versionNumber - a.versionNumber);
+};
+
+export const restoreExamVersion = async (examId: string, versionId: string, actorId: string): Promise<Exam> => {
+  await delay();
+  const exam = db.exams.find((candidate) => candidate.id === examId);
+  const version = db.seatingPlanVersions.find((candidate) => candidate.id === versionId && candidate.examId === examId);
+  if (!exam || !version) throw new Error('Version not found.');
+  if (exam.status === 'LOCKED') throw new Error('Locked seating plans cannot be modified.');
+  exam.seatingPlan = JSON.parse(JSON.stringify(version.seatingPlan));
+  exam.validationReport = version.validationReport || validateExamState(exam);
+  exam.status = exam.validationReport.isValid ? 'GENERATED' : 'DRAFT';
+  replaceSeatAssignmentsForExam(exam);
+  saveExamVersion(exam, actorId, `Restored version ${version.versionNumber}`);
+  return exam;
+};
+
+export const validateExamForPublish = async (examId: string): Promise<ValidationReport> => {
+  await delay();
+  const exam = db.exams.find((candidate) => candidate.id === examId);
+  if (!exam) throw new Error('Exam not found.');
+  exam.validationReport = validateExamState(exam);
+  return exam.validationReport;
+};
+
+export const publishExam = async (examId: string, actorId: string): Promise<Exam> => {
+  await delay();
+  const exam = db.exams.find((candidate) => candidate.id === examId);
+  if (!exam) throw new Error('Exam not found.');
+  if (exam.status === 'LOCKED') throw new Error('Locked seating plans cannot be published again.');
+  const report = validateExamState(exam);
+  exam.validationReport = report;
+  if (!report.isValid) {
+    throw new Error('Exam has validation errors. Resolve them before publishing.');
+  }
+  exam.status = 'PUBLISHED';
+  exam.publishedAt = new Date().toISOString();
+  saveExamVersion(exam, actorId, 'Published seating plan');
+  return exam;
+};
+
+export const lockExam = async (examId: string, actorId: string): Promise<Exam> => {
+  await delay();
+  const exam = db.exams.find((candidate) => candidate.id === examId);
+  if (!exam) throw new Error('Exam not found.');
+  if (exam.status !== 'PUBLISHED') {
+    throw new Error('Only published seating plans can be locked.');
+  }
+  exam.status = 'LOCKED';
+  exam.lockedAt = new Date().toISOString();
+  saveExamVersion(exam, actorId, 'Locked seating plan');
+  return exam;
 };
 
 export const generateClassicSeatingPlan = async (

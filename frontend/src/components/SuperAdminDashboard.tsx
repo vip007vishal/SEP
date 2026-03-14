@@ -4,6 +4,7 @@ import { User, Role, AuditLog } from '../types';
 import { 
     getAllAdmins,
     grantAdminPermission,
+    rejectAdminRequest,
     deleteAdminAndInstitution,
     getAuditLogs
 } from '../services/examService';
@@ -61,10 +62,11 @@ const SuperAdminDashboard: React.FC = () => {
     }, [fetchData]);
 
     const handleGrantAccess = async (adminId: string, instName: string) => {
+        const reason = window.prompt('Optional approval note', 'approved successfully') || 'approved successfully';
         if (window.confirm(`Grant administrator access to "${instName}"? This will allow the admin to log in and manage their institution.`)) {
             setIsLoading(true);
             try {
-                const result = await grantAdminPermission(adminId);
+                const result = await grantAdminPermission(adminId, reason);
                 if (result) {
                     alert(`SUCCESS: Access granted for "${instName}".`);
                     await fetchData();
@@ -77,6 +79,22 @@ const SuperAdminDashboard: React.FC = () => {
                 alert("An unexpected error occurred while granting access.");
                 setIsLoading(false);
             }
+        }
+    };
+
+
+    const handleRejectAccess = async (adminId: string, instName: string) => {
+        const reason = window.prompt(`Enter rejection reason for ${instName}`, 'rejected because duplicate institute');
+        if (!reason) return;
+        setIsLoading(true);
+        try {
+            await rejectAdminRequest(adminId, reason);
+            alert(`Request rejected for ${instName}.`);
+            await fetchData();
+        } catch (error) {
+            console.error('Reject Access Error:', error);
+            alert('Unable to reject request.');
+            setIsLoading(false);
         }
     };
 
@@ -120,7 +138,7 @@ THIS ACTION CANNOT BE UNDONE. Type 'DELETE' to proceed.`;
         a.email.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
-    const pendingAdmins = admins.filter(a => !a.permissionGranted);
+    const pendingAdmins = admins.filter(a => a.approvalStatus !== 'APPROVED');
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
@@ -196,9 +214,9 @@ THIS ACTION CANNOT BE UNDONE. Type 'DELETE' to proceed.`;
                                                     {isLoading ? 'Wait...' : 'Approve Access'}
                                                 </Button>
                                                 <button 
-                                                    onClick={() => handleDeleteInstitution(admin.id, admin.institutionName!)} 
+                                                    onClick={() => handleRejectAccess(admin.id, admin.institutionName!)} 
                                                     className="p-2 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50"
-                                                    title="Reject & Delete"
+                                                    title="Reject Request"
                                                     disabled={isLoading}
                                                 >
                                                     <TrashIcon />
@@ -232,12 +250,12 @@ THIS ACTION CANNOT BE UNDONE. Type 'DELETE' to proceed.`;
                                                     <BuildingIcon className="h-6 w-6 text-slate-600 dark:text-slate-300" />
                                                 </div>
                                                 <span className={`px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${admin.permissionGranted ? 'bg-green-100 text-green-700 dark:bg-green-900/30' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30'}`}>
-                                                    {admin.permissionGranted ? 'Active' : 'Pending'}
+                                                    {admin.approvalStatus || (admin.permissionGranted ? 'APPROVED' : 'PENDING')}
                                                 </span>
                                             </div>
                                             <div className="flex-grow">
                                                 <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 mb-1">{admin.institutionName}</h4>
-                                                <p className="text-sm font-bold text-slate-500">{admin.name}</p>
+                                                <p className="text-sm font-bold text-slate-500">{admin.name}</p>{admin.approvalReason && <p className="text-xs text-slate-400 mt-1">{admin.approvalReason}</p>}
                                                 <p className="text-xs text-slate-400 mt-3 font-mono">{admin.email}</p>
                                             </div>
                                             <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">

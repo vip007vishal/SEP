@@ -38,3 +38,17 @@ export const loginStudent = async (registerNumber: string, adminId: string): Pro
 };
 
 export const logout = async (): Promise<void> => Promise.resolve();
+
+export const requestPasswordResetOtp = async (email: string, newPassword: string): Promise<void> => {
+  await apiRequest('/auth/request-password-reset', {
+    method: 'POST',
+    body: { email, newPassword },
+  });
+};
+
+export const verifyPasswordResetOtp = async (email: string, otp: string): Promise<void> => {
+  await apiRequest('/auth/verify-password-reset', {
+    method: 'POST',
+    body: { email, otp },
+  });
+};
