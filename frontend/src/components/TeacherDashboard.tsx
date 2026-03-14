@@ -1019,20 +1019,27 @@ const TeacherDashboard: React.FC = () => {
         }
         
         if (result.plan) {
-            const examWithPlan = { ...parsedExamData, id: parsedExamData.id || `exam${Date.now()}`, seatingPlan: result.plan } as Exam;
-            
-            await updateExam(examWithPlan);
+            let savedExam: Exam;
+
+            if (parsedExamData.id) {
+                const examWithPlan = { ...parsedExamData, seatingPlan: result.plan } as Exam;
+                savedExam = await updateExam(examWithPlan);
+            } else {
+                savedExam = await createExam({
+                    title: parsedExamData.title,
+                    date: parsedExamData.date,
+                    halls: parsedExamData.halls,
+                    studentSets: parsedExamData.studentSets,
+                    aiSeatingRules: parsedExamData.aiSeatingRules,
+                    seatingType: parsedExamData.seatingType,
+                    editorMode: parsedExamData.editorMode,
+                    seatingPlan: result.plan,
+                }, user!.id);
+            }
+
             await fetchExams();
-            // Update active exam state with new plan
-            const updatedActiveExam = {
-                ...activeExam,
-                id: examWithPlan.id,
-                seatingPlan: examWithPlan.seatingPlan,
-                halls: examWithPlan.halls, // Use parsed halls
-                studentSets: examWithPlan.studentSets, // Use parsed sets
-            };
-            setActiveExam(updatedActiveExam);
-            
+            setActiveExam(savedExam);
+
             if (result.message) {
                 setFormWarning(result.message);
             }

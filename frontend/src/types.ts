@@ -1,4 +1,3 @@
-
 export enum Role {
     SUPER_ADMIN = 'SUPER_ADMIN',
     ADMIN = 'ADMIN',
@@ -13,11 +12,20 @@ export interface User {
     name: string;
     email: string;
     role: Role;
-    password?: string; // For login
-    permissionGranted?: boolean; // For teachers and admins
-    registerNumber?: string; // For students
-    adminId?: string; // Link teacher to an admin, or student to an institution session
-    institutionName?: string; // For admins
+    password?: string;
+    permissionGranted?: boolean;
+    registerNumber?: string;
+    adminId?: string;
+    institutionName?: string;
+    instituteId?: string;
+}
+
+export interface Institute {
+    id: string;
+    name: string;
+    code?: string;
+    adminId?: string;
+    isActive?: boolean;
 }
 
 export interface SeatDefinition {
@@ -36,7 +44,7 @@ export interface HallAllocation {
 export interface HallConstraint {
     type: 'no-limit' | 'advanced';
     allowedSetIds?: string[];
-    setLimits?: { [setId: string]: number }; // Numeric limits per selected set in this hall
+    setLimits?: { [setId: string]: number };
     arrangement?: 'horizontal' | 'vertical';
     allocation?: HallAllocation;
 }
@@ -47,29 +55,34 @@ export interface Hall {
     layout: SeatDefinition[];
     constraints?: HallConstraint;
     frontDirection?: 'top' | 'bottom' | 'left' | 'right';
+    instituteId?: string;
 }
 
 export interface HallTemplate {
     id: string;
     name: string;
     layout: SeatDefinition[];
-    createdBy: string; // teacherId
+    createdBy: string;
     adminId: string;
+    instituteId?: string;
 }
 
 export interface StudentSetTemplate {
     id: string;
     subject: string;
     studentCount: number;
-    createdBy: string; // teacherId
+    students?: string[];
+    createdBy: string;
     adminId: string;
+    instituteId?: string;
 }
 
 export interface StudentSet {
     id: string;
     subject: string;
     studentCount: number;
-    students?: string[]; // Array of student register numbers, e.g., from an Excel file
+    students?: string[];
+    instituteId?: string;
 }
 
 export interface Exam {
@@ -82,12 +95,13 @@ export interface Exam {
     aiSeatingRules?: string;
     seatingType?: 'normal' | 'fair';
     editorMode?: 'ai' | 'classic' | 'advanced' | 'ai-advanced';
-    createdBy: string; // teacherId
+    createdBy: string;
     adminId: string;
+    instituteId?: string;
 }
 
 export interface StudentInfo {
-    id: string; // This will now be the actual student register number
+    id: string;
     setId: string;
     setNumber: number;
 }
@@ -101,12 +115,27 @@ export interface SeatingPlan {
     [hallId: string]: Seat[][];
 }
 
+export interface SeatAssignment {
+    id: string;
+    instituteId: string;
+    examId: string;
+    examTitle: string;
+    examDate: string;
+    studentRollNo: string;
+    studentName?: string;
+    hallId: string;
+    hallName: string;
+    row: number;
+    col: number;
+    seatLabel: string;
+}
+
 export interface AuditLog {
     id: string;
-    adminId: string; // The institution context
+    adminId: string;
     actorName: string;
     role: Role;
-    action: string; // e.g. 'CREATED_EXAM', 'STUDENT_LOGIN'
+    action: string;
     details: string;
     timestamp: string;
 }

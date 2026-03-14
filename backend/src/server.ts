@@ -1,10 +1,21 @@
 import app from "./app";
 import { env } from "./utils/env";
-import { loadDb, saveDb } from "./store/db";
+import { initExamService } from "./services/examService";
 
-const db = loadDb();
-saveDb(db);
+const bootstrap = async () => {
+  await initExamService();
 
-app.listen(env.port, () => {
-  console.log(`Smart Exam Planner backend running on port ${env.port}`);
+  if (process.argv.includes("--init-only")) {
+    console.log("Database schema initialized successfully.");
+    process.exit(0);
+  }
+
+  app.listen(env.port, () => {
+    console.log(`Smart Exam Planner backend running on port ${env.port}`);
+  });
+};
+
+bootstrap().catch((error) => {
+  console.error("Failed to start backend:", error);
+  process.exit(1);
 });

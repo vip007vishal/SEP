@@ -137,18 +137,23 @@ const Login: React.FC = () => {
             return;
         }
 
-        const newUser = await registerAdmin(registerName, email, registerPassword, registerInstitution);
-        setIsLoading(false);
-        if (newUser) {
-            setSuccessMessage('Registration request sent! A Super Admin will review and approve your institution shortly.');
-            setAuthMode('login');
-            setRegisterName('');
-            setEmail('');
-            setRegisterPassword('');
-            setConfirmPassword('');
-            setRegisterInstitution('');
-        } else {
-            setError('An account with this email already exists.');
+        try {
+            const newUser = await registerAdmin(registerName, email, registerPassword, registerInstitution);
+            if (newUser) {
+                setSuccessMessage('Registration request sent! A Super Admin will review and approve your institution shortly.');
+                setAuthMode('login');
+                setRegisterName('');
+                setEmail('');
+                setRegisterPassword('');
+                setConfirmPassword('');
+                setRegisterInstitution('');
+            } else {
+                setError('An account with this email already exists.');
+            }
+        } catch (registerError: any) {
+            setError(registerError.message || 'Unable to register institution.');
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -176,18 +181,23 @@ const Login: React.FC = () => {
             return;
         }
 
-        const newUser = await registerTeacher(registerName, email, registerPassword, adminIdentifier);
-        setIsLoading(false);
-        if (newUser) {
-            setSuccessMessage('Account created. Your institution admin must grant permission before you can log in.');
-            setAuthMode('login');
-            setRegisterName('');
-            setEmail('');
-            setRegisterPassword('');
-            setConfirmPassword('');
-            setAdminIdentifier('');
-        } else {
-            setError('Registration failed. Please check your details.');
+        try {
+            const newUser = await registerTeacher(registerName, email, registerPassword, adminIdentifier);
+            if (newUser) {
+                setSuccessMessage('Account created. Your institution admin must grant permission before you can log in.');
+                setAuthMode('login');
+                setRegisterName('');
+                setEmail('');
+                setRegisterPassword('');
+                setConfirmPassword('');
+                setAdminIdentifier('');
+            } else {
+                setError('Registration failed. Please check your details.');
+            }
+        } catch (registerError: any) {
+            setError(registerError.message || 'Unable to register teacher.');
+        } finally {
+            setIsLoading(false);
         }
     };
     
@@ -200,12 +210,17 @@ const Login: React.FC = () => {
             setIsLoading(false);
             return;
         }
-        const user = await loginStudent(registerNumber, selectedInstitution);
-        setIsLoading(false);
-        if (user) {
-            navigate('/student');
-        } else {
-            setError('Please enter a valid, numeric Register Number.');
+        try {
+            const user = await loginStudent(registerNumber, selectedInstitution);
+            if (user) {
+                navigate('/student');
+            } else {
+                setError('Please enter a valid register number.');
+            }
+        } catch (loginError: any) {
+            setError(loginError.message || 'Unable to log in student.');
+        } finally {
+            setIsLoading(false);
         }
     };
 

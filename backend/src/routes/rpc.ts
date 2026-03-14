@@ -66,7 +66,7 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: "Unknown RPC method." });
     }
     const result = await methods[method](...(Array.isArray(args) ? args : []));
-    if (mutatingMethods.has(method)) examService.persistDb();
+    if (mutatingMethods.has(method)) await examService.persistDb();
     return res.json(sanitizePayload(result));
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "RPC request failed." });

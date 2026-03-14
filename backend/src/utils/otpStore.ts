@@ -1,17 +1,22 @@
 import { env } from "./env";
-
-type OtpRecord = { otp: string; expiresAt: number };
-const store = new Map<string, OtpRecord>();
+import { clearExpiredOtps, deleteOtp, getOtp, storeOtp } from "../store/db";
 
 export const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
-export const setOtp = (email: string, otp: string) => {
-  store.set(email.toLowerCase(), { otp, expiresAt: Date.now() + env.otpExpiryMinutes * 60 * 1000 });
+
+export const setOtp = async (email: string, otp: string) => {
+  await clearExpiredOtps();
+  await storeOtp(email, otp, new Date(Date.now() + env.otpExpiryMinutes * 60 * 1000));
 };
-export const verifyOtp = (email: string, otp: string): boolean => {
-  const record = store.get(email.toLowerCase());
+
+export const verifyOtp = async (email: string, otp: string): Promise<boolean> => {
+  await clearExpiredOtps();
+  const record = await getOtp(email);
   if (!record) return false;
   const isValid = record.otp === otp && record.expiresAt > Date.now();
-  if (isValid) store.delete(email.toLowerCase());
+  if (isValid) {
+    await deleteOtp(email);
+  }
   return isValid;
 };
-export const clearOtp = (email: string) => store.delete(email.toLowerCase());
+
+export const clearOtp = async (email: string) => deleteOtp(email);
