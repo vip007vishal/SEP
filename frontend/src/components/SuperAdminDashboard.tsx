@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { User, Role, AuditLog } from '../types';
 import { 
     getAllAdmins,
+    getAllTeachersForSuperAdmin,
     grantAdminPermission,
     rejectAdminRequest,
     deleteAdminAndInstitution,
@@ -35,6 +36,7 @@ const StatCard: React.FC<{ title: string; value: string | number; icon: React.Re
 const SuperAdminDashboard: React.FC = () => {
     const { user } = useAuth();
     const [admins, setAdmins] = useState<User[]>([]);
+    const [teachers, setTeachers] = useState<User[]>([]);
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
@@ -43,11 +45,13 @@ const SuperAdminDashboard: React.FC = () => {
     const fetchData = useCallback(async () => {
         setIsLoading(true);
         try {
-            const [adminList, auditLogs] = await Promise.all([
+            const [adminList, teacherList, auditLogs] = await Promise.all([
                 getAllAdmins(),
+                getAllTeachersForSuperAdmin(),
                 getAuditLogs('') // Empty string for Super Admin to see all
             ]);
             setAdmins(adminList);
+            setTeachers(teacherList);
             setLogs(auditLogs);
         } catch (error) {
             console.error("Failed to fetch dashboard data:", error);
@@ -257,6 +261,24 @@ THIS ACTION CANNOT BE UNDONE. Type 'DELETE' to proceed.`;
                                                 <h4 className="text-lg font-black text-slate-800 dark:text-slate-100 mb-1">{admin.institutionName}</h4>
                                                 <p className="text-sm font-bold text-slate-500">{admin.name}</p>{admin.approvalReason && <p className="text-xs text-slate-400 mt-1">{admin.approvalReason}</p>}
                                                 <p className="text-xs text-slate-400 mt-3 font-mono">{admin.email}</p>
+                                                <div className="mt-4 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 p-3">
+                                                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">Teachers under this institute</p>
+                                                    {teachers.filter(t => t.adminId === admin.id).length > 0 ? (
+                                                        <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
+                                                            {teachers.filter(t => t.adminId === admin.id).map(teacher => (
+                                                                <div key={teacher.id} className="flex items-center justify-between gap-3 text-xs">
+                                                                    <div className="min-w-0">
+                                                                        <p className="font-medium text-slate-700 dark:text-slate-200 truncate">{teacher.name}</p>
+                                                                        <p className="text-slate-400 truncate">{teacher.email}</p>
+                                                                    </div>
+                                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${teacher.approvalStatus === 'APPROVED' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : teacher.approvalStatus === 'REJECTED' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>{teacher.approvalStatus || 'PENDING'}</span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="text-xs text-slate-400">No teachers registered yet.</p>
+                                                    )}
+                                                </div>
                                             </div>
                                             <div className="mt-6 pt-6 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center">
                                                 {!admin.permissionGranted ? (

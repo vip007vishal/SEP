@@ -8,6 +8,7 @@ const router = Router();
 const methods: Record<string, (...args: any[]) => Promise<any>> = {
   getAuditLogs: examService.getAuditLogs,
   getAllAdmins: examService.getAllAdmins,
+  getAllTeachersForSuperAdmin: examService.getAllTeachersForSuperAdmin,
   grantAdminPermission: examService.grantAdminPermission,
   rejectAdminRequest: examService.rejectAdminRequest,
   deleteAdminAndInstitution: examService.deleteAdminAndInstitution,
@@ -22,6 +23,9 @@ const methods: Record<string, (...args: any[]) => Promise<any>> = {
   getExamsForAdmin: examService.getExamsForAdmin,
   getExamsForStudent: examService.getExamsForStudent,
   getExamsForTeacher: examService.getExamsForTeacher,
+  getDeletedExamsForAdmin: examService.getDeletedExamsForAdmin,
+  getDeletedExamsForTeacher: examService.getDeletedExamsForTeacher,
+  restoreDeletedExam: examService.restoreDeletedExam,
   createExam: examService.createExam,
   updateExam: examService.updateExam,
   updateExamSeatingPlan: examService.updateExamSeatingPlan,
@@ -39,6 +43,7 @@ const methods: Record<string, (...args: any[]) => Promise<any>> = {
   getSeatingTemplatesForTeacher: examService.getSeatingTemplatesForTeacher,
   getSeatingTemplatesForAdmin: examService.getSeatingTemplatesForAdmin,
   createSeatingTemplateFromExam: examService.createSeatingTemplateFromExam,
+  deleteSeatingTemplate: examService.deleteSeatingTemplate,
   applySeatingTemplateToExam: examService.applySeatingTemplateToExam,
   getExamVersionHistory: examService.getExamVersionHistory,
   restoreExamVersion: examService.restoreExamVersion,
@@ -52,10 +57,10 @@ const methods: Record<string, (...args: any[]) => Promise<any>> = {
 
 const mutatingMethods = new Set([
   "grantAdminPermission", "rejectAdminRequest", "deleteAdminAndInstitution", "grantTeacherPermission", "rejectTeacherPermission", "revokeTeacherPermission",
-  "deleteTeacher", "createExam", "updateExam", "updateExamSeatingPlan", "deleteExam",
+  "deleteTeacher", "createExam", "updateExam", "updateExamSeatingPlan", "deleteExam", "restoreDeletedExam",
   "createHallTemplate", "updateHallTemplate", "deleteHallTemplate",
   "createStudentSetTemplate", "updateStudentSetTemplate", "deleteStudentSetTemplate",
-  "createSeatingTemplateFromExam", "applySeatingTemplateToExam", "restoreExamVersion", "publishExam", "lockExam",
+  "createSeatingTemplateFromExam", "deleteSeatingTemplate", "applySeatingTemplateToExam", "restoreExamVersion", "publishExam", "lockExam",
 ]);
 
 const sanitizePayload = (payload: any): any => {

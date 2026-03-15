@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS users (
   institute_id TEXT,
   approval_status TEXT NOT NULL DEFAULT 'PENDING',
   approval_reason TEXT,
+  reply_to_email TEXT,
+  failed_login_count INTEGER NOT NULL DEFAULT 0,
+  locked_until TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status TEXT NOT NULL DEFAULT 'PENDING';
@@ -78,6 +81,8 @@ CREATE TABLE IF NOT EXISTS exams (
   locked_at TIMESTAMPTZ,
   auto_delete_seating_after_exam BOOLEAN NOT NULL DEFAULT FALSE,
   source_template_id TEXT,
+  deleted_at TIMESTAMPTZ,
+  deleted_by TEXT,
   created_by TEXT NOT NULL,
   admin_id TEXT NOT NULL,
   institute_id TEXT NOT NULL,
@@ -144,6 +149,13 @@ CREATE TABLE IF NOT EXISTS seating_templates (
   halls JSONB NOT NULL,
   student_sets JSONB NOT NULL,
   seating_plan JSONB NOT NULL,
+  title TEXT,
+  session TEXT,
+  start_time TEXT,
+  editor_mode TEXT,
+  seating_type TEXT,
+  ai_seating_rules TEXT,
+  auto_delete_seating_after_exam BOOLEAN NOT NULL DEFAULT FALSE,
   source_exam_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -173,3 +185,19 @@ CREATE TABLE IF NOT EXISTS otp_store (
 ALTER TABLE otp_store ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'LOGIN';
 ALTER TABLE otp_store ADD COLUMN IF NOT EXISTS payload JSONB;
 CREATE INDEX IF NOT EXISTS idx_otp_store_expires_at ON otp_store(expires_at);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reply_to_email TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE exams ADD COLUMN IF NOT EXISTS deleted_by TEXT;
+CREATE INDEX IF NOT EXISTS idx_exams_deleted_at ON exams(deleted_at);
+
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS session TEXT;
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS start_time TEXT;
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS editor_mode TEXT;
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS seating_type TEXT;
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS ai_seating_rules TEXT;
+ALTER TABLE seating_templates ADD COLUMN IF NOT EXISTS auto_delete_seating_after_exam BOOLEAN NOT NULL DEFAULT FALSE;

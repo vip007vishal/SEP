@@ -16,6 +16,7 @@ export interface User {
   email: string;
   role: Role;
   password?: string;
+  replyToEmail?: string;
   permissionGranted?: boolean;
   registerNumber?: string;
   adminId?: string;
@@ -23,6 +24,8 @@ export interface User {
   instituteId?: string;
   approvalStatus?: ApprovalStatus;
   approvalReason?: string;
+  failedLoginCount?: number;
+  lockedUntil?: string;
 }
 
 export interface Institute {
@@ -143,6 +146,8 @@ export interface Exam {
   seatingPlanVersion?: number;
   autoDeleteSeatingAfterExam?: boolean;
   sourceTemplateId?: string;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
 }
 
 export interface SeatingPlanVersion {
@@ -163,10 +168,18 @@ export interface SeatingPlanTemplate {
   createdBy: string;
   adminId: string;
   instituteId?: string;
+  title?: string;
+  session?: ExamSession;
+  startTime?: string;
+  editorMode?: 'ai' | 'classic' | 'advanced' | 'ai-advanced';
+  seatingType?: 'normal' | 'fair';
+  aiSeatingRules?: string;
+  autoDeleteSeatingAfterExam?: boolean;
   halls: Hall[];
   studentSets: StudentSet[];
   seatingPlan: SeatingPlan;
   createdAt: string;
+  sourceExamId?: string;
 }
 
 export interface SeatAssignment {

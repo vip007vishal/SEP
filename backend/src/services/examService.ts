@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { DbData, loadDb, saveDb } from '../store/db';
 import { env } from '../utils/env';
+import { sendNotificationMail } from '../utils/mailer';
+import { hashPassword } from '../utils/security';
 import { ApprovalStatus, AuditLog, Exam, ExamSession, ExamStatus, Hall, HallTemplate, Institute, Role, Seat, SeatAssignment, SeatDefinition, SeatingPlan, SeatingPlanTemplate, SeatingPlanVersion, StudentInfo, StudentSet, StudentSetTemplate, User, ValidationIssue, ValidationReport } from '../types';
 
 let db: DbData = {
@@ -23,27 +25,41 @@ const normalizeText = (value: string) => value.trim();
 const normalizeRoll = (value: string) => value.trim().toLowerCase();
 
 const examStatusOrder: ExamStatus[] = ['DRAFT', 'GENERATED', 'PUBLISHED', 'LOCKED'];
+const purgeDeletedExams = async () => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const beforeIds = new Set(db.exams.filter((exam) => exam.deletedAt && new Date(exam.deletedAt) <= cutoff).map((exam) => exam.id));
+  if (beforeIds.size === 0) return;
+  db.exams = db.exams.filter((exam) => !beforeIds.has(exam.id));
+  db.seatAssignments = db.seatAssignments.filter((assignment) => !beforeIds.has(assignment.examId));
+  db.seatingPlanVersions = db.seatingPlanVersions.filter((version) => !beforeIds.has(version.examId));
+  db.seatingTemplates = db.seatingTemplates.filter((template) => !template.sourceExamId || !beforeIds.has(template.sourceExamId));
+  await saveDb(db);
+};
 const purgeExpiredSeatingData = async () => {
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 1);
   let changed = false;
+  const purgedExamIds = new Set<string>();
   db.exams = db.exams.map((exam) => {
     if (!exam.autoDeleteSeatingAfterExam || !exam.seatingPlan) return exam;
     const examDate = new Date(exam.date);
     if (Number.isNaN(examDate.getTime()) || examDate > cutoff) return exam;
     changed = true;
+    purgedExamIds.add(exam.id);
     return {
       ...exam,
       seatingPlan: undefined,
-      status: exam.status === 'LOCKED' ? 'LOCKED' : 'DRAFT',
+      status: 'DRAFT',
       validationReport: undefined,
+      seatingPlanVersion: 0,
+      publishedAt: undefined,
+      lockedAt: undefined,
     };
   });
   if (changed) {
-    db.seatAssignments = db.seatAssignments.filter((assignment) => {
-      const exam = db.exams.find((candidate) => candidate.id === assignment.examId);
-      return !!exam?.seatingPlan;
-    });
+    db.seatAssignments = db.seatAssignments.filter((assignment) => !purgedExamIds.has(assignment.examId));
+    db.seatingPlanVersions = db.seatingPlanVersions.filter((version) => !purgedExamIds.has(version.examId));
     await saveDb(db);
   }
 };
@@ -97,6 +113,7 @@ export const initExamService = async () => {
     db.seatAssignments = rebuiltAssignments;
   }
 
+  await purgeDeletedExams();
   await purgeExpiredSeatingData();
   await saveDb(db);
 };
@@ -314,6 +331,22 @@ const adminContextForUser = (user?: User | null) => {
   }
   return { adminId: '', instituteId: user.instituteId || '' };
 };
+const notifyApproval = async (to: string | undefined, approver: User | undefined, subject: string, text: string, html?: string) => {
+  if (!to || !approver?.email) return;
+  try {
+    await sendNotificationMail({
+      to,
+      subject,
+      text,
+      html,
+      replyTo: approver.email,
+      senderName: approver.name,
+    });
+  } catch (error) {
+    console.error('Approval notification email failed:', error);
+  }
+};
+
 
 export const getAuditLogs = async (adminId: string): Promise<AuditLog[]> => {
   await delay();
@@ -325,10 +358,18 @@ export const getAllAdmins = async (): Promise<User[]> => {
   await delay();
   return db.users.filter((u) => u.role === Role.ADMIN).sort((a, b) => (a.institutionName || '').localeCompare(b.institutionName || ''));
 };
+export const getAllTeachersForSuperAdmin = async (): Promise<User[]> => {
+  await delay();
+  return db.users
+    .filter((u) => u.role === Role.TEACHER)
+    .sort((a, b) => ((a.instituteId || '').localeCompare(b.instituteId || '')) || a.name.localeCompare(b.name));
+};
+
 
 export const grantAdminPermission = async (adminId: string, reason?: string): Promise<User | undefined> => {
   await delay();
   const admin = getAdminById(adminId);
+  const superAdmin = db.users.find((candidate) => candidate.role === Role.SUPER_ADMIN) || { name: env.superAdminName, email: env.superAdminEmail } as User;
   if (!admin) return undefined;
   admin.permissionGranted = true;
   admin.approvalStatus = 'APPROVED';
@@ -341,6 +382,13 @@ export const grantAdminPermission = async (adminId: string, reason?: string): Pr
     institute.name = admin.institutionName || institute.name;
   }
   logActivity('SYSTEM', env.superAdminName, Role.SUPER_ADMIN, 'GRANT_ADMIN_ACCESS', `Approved institution admin: ${admin.institutionName}`);
+  await notifyApproval(
+    admin.email,
+    superAdmin,
+    'Smart Exam Planner account approved',
+    `Hello ${admin.name}, your administrator account request for ${admin.institutionName || 'your institution'} has been approved. You can now log in to Smart Exam Planner.`,
+    `<p>Hello <strong>${admin.name}</strong>,</p><p>Your administrator account request for <strong>${admin.institutionName || 'your institution'}</strong> has been approved.</p><p>You can now log in to Smart Exam Planner.</p><p>Approval note: ${admin.approvalReason}</p>`
+  );
   return { ...admin };
 };
 
@@ -400,7 +448,7 @@ export const resetUserPassword = async (email: string, newPassword: string): Pro
   await delay();
   const user = db.users.find((candidate) => normalizeEmail(candidate.email) === normalizeEmail(email) && ['ADMIN', 'TEACHER'].includes(candidate.role));
   if (!user) return undefined;
-  user.password = newPassword.trim();
+  user.password = hashPassword(newPassword.trim());
   logActivity(user.adminId || user.id, user.name, user.role, 'RESET_PASSWORD', `Password reset completed for ${user.email}`);
   return { ...user };
 };
@@ -420,7 +468,7 @@ export const createAdminUser = async (name: string, email: string, password: str
     name: normalizeText(name),
     email: normalizedEmail,
     role: Role.ADMIN,
-    password: password.trim(),
+    password: hashPassword(password.trim()),
     institutionName: normalizedInstitution,
     permissionGranted: false,
     instituteId,
@@ -451,7 +499,7 @@ export const createTeacherUser = async (name: string, email: string, password: s
     name: normalizeText(name),
     email: normalizedEmail,
     role: Role.TEACHER,
-    password: password.trim(),
+    password: hashPassword(password.trim()),
     permissionGranted: false,
     adminId: admin.id,
     instituteId,
@@ -485,6 +533,13 @@ export const grantTeacherPermission = async (teacherId: string, adminId: string,
   teacher.approvalStatus = 'APPROVED';
   teacher.approvalReason = reason || 'approved successfully';
   logActivity(adminId, admin.name, Role.ADMIN, 'GRANTED_PERMISSION', `Approved teacher account: ${teacher.name}`);
+  await notifyApproval(
+    teacher.email,
+    admin,
+    'Smart Exam Planner teacher account approved',
+    `Hello ${teacher.name}, your teacher account for ${admin.institutionName || 'your institution'} has been approved. You can now log in to Smart Exam Planner.`,
+    `<p>Hello <strong>${teacher.name}</strong>,</p><p>Your teacher account for <strong>${admin.institutionName || 'your institution'}</strong> has been approved.</p><p>You can now log in to Smart Exam Planner.</p><p>Approval note: ${teacher.approvalReason}</p>`
+  );
   return { ...teacher };
 };
 
@@ -536,12 +591,14 @@ export const deleteTeacher = async (teacherId: string, adminId: string): Promise
 
 export const getExamsForAdmin = async (adminId: string): Promise<Exam[]> => {
   await delay();
+  await purgeDeletedExams();
   await purgeExpiredSeatingData();
-  return db.exams.filter((e) => e.adminId === adminId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  return db.exams.filter((e) => e.adminId === adminId && !e.deletedAt).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 
 export const getExamsForStudent = async (registerNumber: string, instituteId: string): Promise<Exam[]> => {
   await delay();
+  await purgeDeletedExams();
   await purgeExpiredSeatingData();
   const normalizedInstituteId = normalizeText(instituteId);
   const normalizedRoll = normalizeRoll(registerNumber);
@@ -550,13 +607,16 @@ export const getExamsForStudent = async (registerNumber: string, instituteId: st
   );
   const examIds = new Set(matchingAssignments.map((assignment) => assignment.examId));
   return db.exams
-    .filter((exam) => exam.instituteId === normalizedInstituteId && examIds.has(exam.id) && !!exam.seatingPlan && ['PUBLISHED', 'LOCKED'].includes(exam.status || 'DRAFT'))
+.filter((exam) => !exam.deletedAt && exam.instituteId === normalizedInstituteId && examIds.has(exam.id) && !!exam.seatingPlan && ['PUBLISHED', 'LOCKED'].includes(exam.status || 'DRAFT'))
     .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 
 export const getExamsForTeacher = async (teacherId: string): Promise<Exam[]> => {
   await delay();
-  return db.exams.filter((e) => e.createdBy === teacherId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  await purgeDeletedExams();
+  const teacher = await findUserById(teacherId);
+  const context = adminContextForUser(teacher);
+  return db.exams.filter((e) => !e.deletedAt && ((e.createdBy === teacherId) || (!!context.adminId && e.adminId === context.adminId))).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
 };
 
 export const createExam = async (examData: any, teacherId: string): Promise<Exam> => {
@@ -582,6 +642,8 @@ export const createExam = async (examData: any, teacherId: string): Promise<Exam
     seatingPlanVersion: examData.seatingPlanVersion || 0,
     autoDeleteSeatingAfterExam: examData.autoDeleteSeatingAfterExam ?? false,
     sourceTemplateId: examData.sourceTemplateId,
+    deletedAt: null,
+    deletedBy: null,
     halls: (examData.halls || []).map((h: any, i: number) => ({ ...h, id: h.id || `hall${timestamp}${i}`, instituteId: examData.instituteId || teacherContext.instituteId })),
     studentSets: (examData.studentSets || []).map((s: any, i: number) => ({ ...s, id: s.id || `set${timestamp}${i}`, instituteId: examData.instituteId || teacherContext.instituteId })),
     seatingPlan: examData.seatingPlan || undefined,
@@ -615,6 +677,8 @@ export const updateExam = async (updatedExam: Exam): Promise<Exam> => {
     session: updatedExam.session || existing.session || 'Morning',
     status: existing.status === 'LOCKED' ? 'LOCKED' : (updatedExam.status || existing.status || 'DRAFT'),
     autoDeleteSeatingAfterExam: updatedExam.autoDeleteSeatingAfterExam ?? existing.autoDeleteSeatingAfterExam ?? false,
+    deletedAt: updatedExam.deletedAt ?? existing.deletedAt ?? null,
+    deletedBy: updatedExam.deletedBy ?? existing.deletedBy ?? null,
   };
   if (merged.seatingPlan) {
     merged.validationReport = validateExamState(merged);
@@ -655,12 +719,40 @@ export const deleteExam = async (examId: string, ownerId: string, role: Role): P
   await delay();
   const exam = db.exams.find((e) => e.id === examId);
   if (!exam) return false;
-  db.exams = db.exams.filter((e) => e.id !== examId);
-  db.seatAssignments = db.seatAssignments.filter((assignment) => assignment.examId !== examId);
-  db.seatingPlanVersions = db.seatingPlanVersions.filter((version) => version.examId !== examId);
+  exam.deletedAt = new Date().toISOString();
+  exam.deletedBy = ownerId;
   const actor = await findUserById(ownerId);
-  logActivity(exam.adminId, actor?.name || 'User', role, 'DELETED_EXAM', `Deleted exam: "${exam.title}"`);
+  logActivity(exam.adminId, actor?.name || 'User', role, 'DELETED_EXAM', `Moved exam to recycle bin: "${exam.title}"`);
   return true;
+};
+
+export const getDeletedExamsForAdmin = async (adminId: string): Promise<Exam[]> => {
+  await delay();
+  await purgeDeletedExams();
+  return db.exams.filter((exam) => exam.adminId === adminId && !!exam.deletedAt).sort((a,b)=> (b.deletedAt||'').localeCompare(a.deletedAt||''));
+};
+
+export const getDeletedExamsForTeacher = async (teacherId: string): Promise<Exam[]> => {
+  await delay();
+  await purgeDeletedExams();
+  const teacher = await findUserById(teacherId);
+  const context = adminContextForUser(teacher);
+  return db.exams.filter((exam) => !!exam.deletedAt && ((exam.createdBy === teacherId) || (!!context.adminId && exam.adminId === context.adminId))).sort((a,b)=> (b.deletedAt||'').localeCompare(a.deletedAt||''));
+};
+
+export const restoreDeletedExam = async (examId: string, actorId: string, role: Role): Promise<Exam | null> => {
+  await delay();
+  const exam = db.exams.find((candidate) => candidate.id === examId && !!candidate.deletedAt);
+  if (!exam) return null;
+  const actor = await findUserById(actorId);
+  const actorAdminId = actor?.role === Role.ADMIN ? actor.id : actor?.adminId;
+  if (role !== Role.SUPER_ADMIN && actorAdminId && exam.adminId !== actorAdminId && exam.createdBy !== actorId) {
+    throw new Error('You are not allowed to restore this exam.');
+  }
+  exam.deletedAt = null;
+  exam.deletedBy = null;
+  logActivity(exam.adminId, actor?.name || 'User', role, 'RESTORED_EXAM', `Restored exam from recycle bin: "${exam.title}"`);
+  return exam;
 };
 
 export const loginStudent = async (registerNumber: string, instituteId: string): Promise<User> => {
@@ -844,6 +936,13 @@ export const createSeatingTemplateFromExam = async (examId: string, name: string
     halls: JSON.parse(JSON.stringify(exam.halls || [])),
     studentSets: JSON.parse(JSON.stringify(exam.studentSets || [])),
     seatingPlan: JSON.parse(JSON.stringify(exam.seatingPlan)),
+    title: exam.title,
+    session: exam.session,
+    startTime: exam.startTime,
+    editorMode: exam.editorMode,
+    seatingType: exam.seatingType,
+    aiSeatingRules: exam.aiSeatingRules,
+    autoDeleteSeatingAfterExam: exam.autoDeleteSeatingAfterExam ?? false,
     createdAt: new Date().toISOString(),
   } as SeatingPlanTemplate;
   (template as any).sourceExamId = exam.id;
@@ -851,6 +950,21 @@ export const createSeatingTemplateFromExam = async (examId: string, name: string
   logActivity(context.adminId || exam.adminId, creator?.name || 'User', creator?.role || Role.TEACHER, 'CREATE_SEATING_TEMPLATE', `Saved seating template ${template.name}`);
   return template;
 };
+export const deleteSeatingTemplate = async (templateId: string, actorId: string, role: Role): Promise<boolean> => {
+  await delay();
+  const actor = await findUserById(actorId);
+  const index = db.seatingTemplates.findIndex((candidate) => candidate.id === templateId);
+  if (index === -1) return false;
+  const template = db.seatingTemplates[index];
+  const actorAdminId = actor?.role === Role.ADMIN ? actor.id : actor?.adminId;
+  if (role !== Role.SUPER_ADMIN && template.adminId !== actorAdminId) {
+    throw new Error('You are not allowed to delete this seating template.');
+  }
+  db.seatingTemplates.splice(index, 1);
+  logActivity(template.adminId, actor?.name || 'User', role, 'DELETE_SEATING_TEMPLATE', `Deleted seating template ${template.name}`);
+  return true;
+};
+
 
 export const applySeatingTemplateToExam = async (templateId: string, examId: string, actorId: string): Promise<Exam> => {
   await delay();
@@ -862,6 +976,13 @@ export const applySeatingTemplateToExam = async (templateId: string, examId: str
   exam.studentSets = JSON.parse(JSON.stringify(template.studentSets || []));
   exam.seatingPlan = JSON.parse(JSON.stringify(template.seatingPlan));
   exam.sourceTemplateId = template.id;
+  exam.title = template.title || exam.title;
+  exam.session = template.session || exam.session || 'Morning';
+  exam.startTime = template.startTime || exam.startTime || '';
+  exam.editorMode = template.editorMode || exam.editorMode;
+  exam.seatingType = template.seatingType || exam.seatingType;
+  exam.aiSeatingRules = template.aiSeatingRules || exam.aiSeatingRules;
+  exam.autoDeleteSeatingAfterExam = template.autoDeleteSeatingAfterExam ?? exam.autoDeleteSeatingAfterExam;
   exam.validationReport = validateExamState(exam);
   exam.status = exam.validationReport.isValid ? 'GENERATED' : 'DRAFT';
   replaceSeatAssignmentsForExam(exam);

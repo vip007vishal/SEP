@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, Exam, Role, Hall, HallTemplate, StudentSetTemplate, SeatDefinition, AuditLog } from '../types';
+import { User, Exam, Role, Hall, HallTemplate, StudentSetTemplate, SeatDefinition, AuditLog, SeatingPlanTemplate } from '../types';
 import { 
     getTeachersForAdmin, 
     getUnassignedTeachers,
@@ -8,6 +8,8 @@ import {
     rejectTeacherPermission,
     revokeTeacherPermission,
     getExamsForAdmin, 
+    getDeletedExamsForAdmin,
+    restoreDeletedExam,
     deleteExam, 
     deleteTeacher,
     getHallTemplatesForAdmin,
@@ -16,6 +18,8 @@ import {
     getStudentSetTemplatesForAdmin,
     createStudentSetTemplate,
     deleteStudentSetTemplate,
+    getSeatingTemplatesForAdmin,
+    deleteSeatingTemplate,
     getAuditLogs
 } from '../services/examService';
 import Header from './common/Header';
@@ -63,6 +67,7 @@ const AdminDashboard: React.FC = () => {
     const [isLoadingExams, setIsLoadingExams] = useState(true);
     const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
     const [logs, setLogs] = useState<AuditLog[]>([]);
+    const [deletedExams, setDeletedExams] = useState<Exam[]>([]);
     const visibleHallRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
     // Navigation
@@ -76,6 +81,7 @@ const AdminDashboard: React.FC = () => {
     // Template states
     const [hallTemplates, setHallTemplates] = useState<HallTemplate[]>([]);
     const [studentSetTemplates, setStudentSetTemplates] = useState<StudentSetTemplate[]>([]);
+    const [seatingTemplates, setSeatingTemplates] = useState<SeatingPlanTemplate[]>([]);
     const [hallEditorState, setHallEditorState] = useState<{ mode: 'closed' | 'create-template' }>({ mode: 'closed' });
     const [isGridTemplateModalOpen, setIsGridTemplateModalOpen] = useState(false);
     const [newGridTemplate, setNewGridTemplate] = useState({ name: '', rows: '8', cols: '10' });
@@ -104,6 +110,12 @@ const AdminDashboard: React.FC = () => {
         setIsLoadingExams(false);
     }, [user]);
 
+    const fetchDeletedExams = useCallback(async () => {
+        if (!user) return;
+        const data = await getDeletedExamsForAdmin(user.id);
+        setDeletedExams(data);
+    }, [user]);
+
     const fetchHallTemplates = useCallback(async () => {
         if (!user) return;
         const data = await getHallTemplatesForAdmin(user.id);
@@ -114,6 +126,12 @@ const AdminDashboard: React.FC = () => {
         if (!user) return;
         const data = await getStudentSetTemplatesForAdmin(user.id);
         setStudentSetTemplates(data);
+    }, [user]);
+
+    const fetchSeatingTemplates = useCallback(async () => {
+        if (!user) return;
+        const data = await getSeatingTemplatesForAdmin(user.id);
+        setSeatingTemplates(data);
     }, [user]);
 
     const fetchLogs = useCallback(async () => {
@@ -127,8 +145,10 @@ const AdminDashboard: React.FC = () => {
         fetchExams();
         fetchHallTemplates();
         fetchStudentSetTemplates();
+        fetchSeatingTemplates();
+        fetchDeletedExams();
         fetchLogs();
-    }, [fetchAllTeachers, fetchExams, fetchHallTemplates, fetchStudentSetTemplates, fetchLogs]);
+    }, [fetchAllTeachers, fetchExams, fetchHallTemplates, fetchStudentSetTemplates, fetchSeatingTemplates, fetchDeletedExams, fetchLogs]);
 
     const handleGrantPermission = async (teacherId: string) => {
         if (!user) return;
@@ -160,7 +180,7 @@ const AdminDashboard: React.FC = () => {
             const success = await deleteTeacher(teacherId, user.id);
             if (success) {
                 await fetchAllTeachers();
-                await fetchExams();
+                await Promise.all([fetchExams(), fetchDeletedExams()]);
                 await fetchLogs();
             } else {
                 alert("Failed to delete teacher. Ensure you have the correct permissions.");
@@ -170,17 +190,26 @@ const AdminDashboard: React.FC = () => {
 
     const handleDeleteExam = async (examId: string) => {
         if (!user) return;
-        if (window.confirm('Are you sure you want to permanently delete this exam? This action cannot be undone.')) {
+        if (window.confirm('Move this exam to recycle bin? It can be restored within 30 days.')) {
             const success = await deleteExam(examId, user.id, user.role);
             if (success) {
                 if (selectedExam?.id === examId) {
                     setSelectedExam(null);
                 }
-                await fetchExams();
+                await Promise.all([fetchExams(), fetchDeletedExams()]);
                 await fetchLogs();
             } else {
                 alert("Failed to delete exam.");
             }
+        }
+    };
+
+    const handleRestoreDeletedExam = async (examId: string) => {
+        if (!user) return;
+        const restored = await restoreDeletedExam(examId, user.id, user.role);
+        if (restored) {
+            await Promise.all([fetchExams(), fetchDeletedExams()]);
+            await fetchLogs();
         }
     };
 
@@ -426,6 +455,16 @@ const AdminDashboard: React.FC = () => {
         }
     };
 
+    const handleDeleteSeatingTemplate = async (templateId: string, templateName: string) => {
+        if (user && window.confirm(`Are you sure you want to delete the seating template "${templateName}"? This cannot be undone.`)) {
+            const success = await deleteSeatingTemplate(templateId, user.id, user.role);
+            if (success) {
+                await fetchSeatingTemplates();
+            } else {
+                alert("Failed to delete seating template. You may not have permission.");
+            }
+        }
+    };
 
     const examForDownload = exams.find(e => e.id === downloadingExamId);
 
@@ -837,16 +876,14 @@ const AdminDashboard: React.FC = () => {
                                         <UsersIcon className="h-6 w-6 text-blue-500" /> Active Staff Directory
                                     </h3>
                                     <div className="relative w-full sm:w-72">
-                                        <Input 
-                                            placeholder="Search by name or email..." 
+                                        <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
+                                        <input
+                                            type="text"
+                                            placeholder="Search by name or email..."
                                             value={searchQuery}
                                             onChange={(e) => setSearchQuery(e.target.value)}
-                                            containerClassName="mb-0"
-                                            className="pl-10"
+                                            className="w-full pl-10 pr-3 py-1.5 text-sm rounded border border-slate-300 dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-violet-500 outline-none"
                                         />
-                                        <div className="absolute left-3 top-2.5 text-slate-400">
-                                            <SearchIcon className="h-5 w-5" />
-                                        </div>
                                     </div>
                                 </div>
                                 
@@ -885,6 +922,7 @@ const AdminDashboard: React.FC = () => {
                                     </div>
                                 )}
                             </Card>
+
                         </div>
                     )}
 
@@ -896,16 +934,14 @@ const AdminDashboard: React.FC = () => {
                                     <CalendarIcon className="h-6 w-6 text-violet-500" /> Exam Schedules
                                 </h3>
                                 <div className="relative w-full sm:w-72">
-                                    <Input 
-                                        placeholder="Search exams by title..." 
+                                    <SearchIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-4 w-4" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search exams by title..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
-                                        containerClassName="mb-0"
-                                        className="pl-10"
+                                        className="w-full pl-10 pr-3 py-1.5 text-sm rounded border border-slate-300 dark:bg-slate-700 dark:border-slate-600 focus:ring-2 focus:ring-violet-500 outline-none"
                                     />
-                                    <div className="absolute left-3 top-2.5 text-slate-400">
-                                        <SearchIcon className="h-5 w-5" />
-                                    </div>
                                 </div>
                             </div>
 
@@ -948,6 +984,28 @@ const AdminDashboard: React.FC = () => {
                                    <p className="text-slate-500 dark:text-slate-400 font-medium">No exams found matching your criteria.</p>
                                </div>
                             )}
+
+                            <div className="mt-8 border-t border-slate-200 dark:border-slate-700 pt-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Recycle Bin</h3>
+                                    <span className="text-xs text-slate-500 dark:text-slate-400">{deletedExams.length} deleted exams</span>
+                                </div>
+                                {deletedExams.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {deletedExams.map(exam => (
+                                            <div key={exam.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl border border-amber-200 bg-amber-50/70 dark:bg-amber-500/10 dark:border-amber-500/20">
+                                                <div>
+                                                    <p className="font-semibold text-slate-800 dark:text-slate-100">{exam.title}</p>
+                                                    <p className="text-xs text-slate-500 dark:text-slate-400">Deleted {exam.deletedAt ? new Date(exam.deletedAt).toLocaleString() : 'recently'} • Restorable for 30 days</p>
+                                                </div>
+                                                <Button variant="secondary" className="!py-1.5 !px-3 !text-sm" onClick={() => handleRestoreDeletedExam(exam.id)}>Restore</Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">No deleted exams in recycle bin.</p>
+                                )}
+                            </div>
                         </Card>
                     )}
 
@@ -1037,6 +1095,34 @@ const AdminDashboard: React.FC = () => {
                                         </div>
                                     ))}
                                     {studentSetTemplates.length === 0 && <p className="text-center text-sm text-slate-500 py-8 italic">No student set templates created yet.</p>}
+                                </div>
+                            </Card>
+
+                            <Card className="h-full lg:col-span-2">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-lg font-bold flex items-center gap-2 text-slate-800 dark:text-slate-200">
+                                        <CalendarIcon className="h-5 w-5 text-violet-500" /> Seating Templates
+                                    </h3>
+                                    <span className="text-xs text-slate-500 dark:text-slate-400">{seatingTemplates.length} templates</span>
+                                </div>
+                                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1 custom-scrollbar">
+                                    {seatingTemplates.length > 0 ? seatingTemplates.map(template => (
+                                        <div key={template.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-700 rounded-lg hover:shadow-sm transition-all hover:border-violet-300">
+                                            <div>
+                                                <p className="font-semibold text-sm text-slate-800 dark:text-slate-200">{template.name}</p>
+                                                <p className="text-xs text-slate-500">{template.halls.length} halls • {template.studentSets.length} student sets</p>
+                                                <p className="text-[10px] text-slate-400 mt-1">Creator: {getUserName(template.createdBy)} • Saved {new Date(template.createdAt).toLocaleString()}</p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteSeatingTemplate(template.id, template.name); }}
+                                                className="self-end sm:self-auto text-slate-400 hover:text-red-500 p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-all"
+                                                title="Delete Seating Template"
+                                            >
+                                                <TrashIcon className="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    )) : <p className="text-center text-sm text-slate-500 py-8 italic">No seating templates saved yet.</p>}
                                 </div>
                             </Card>
                         </div>

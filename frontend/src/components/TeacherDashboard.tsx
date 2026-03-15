@@ -3,6 +3,8 @@ import { useAuth } from '../context/AuthContext';
 import { Exam, Hall, StudentSet, HallTemplate, StudentSetTemplate, SeatDefinition, HallConstraint, User, SeatingPlan, HallAllocation, SeatingPlanTemplate, SeatingPlanVersion } from '../types';
 import { 
     getExamsForTeacher, 
+    getDeletedExamsForTeacher,
+    restoreDeletedExam,
     generateSeatingPlan,
     generateClassicSeatingPlan,
     updateExam, 
@@ -20,6 +22,8 @@ import {
     updateExamSeatingPlan,
     findUserById,
     createSeatingTemplateFromExam,
+    getSeatingTemplatesForTeacher,
+    deleteSeatingTemplate,
     getExamVersionHistory,
     restoreExamVersion,
     validateExamForPublish,
@@ -237,6 +241,8 @@ const TeacherDashboard: React.FC = () => {
     const [exams, setExams] = useState<Exam[]>([]);
     const [hallTemplates, setHallTemplates] = useState<HallTemplate[]>([]);
     const [studentSetTemplates, setStudentSetTemplates] = useState<StudentSetTemplate[]>([]);
+    const [seatingTemplates, setSeatingTemplates] = useState<SeatingPlanTemplate[]>([]);
+    const [deletedExams, setDeletedExams] = useState<Exam[]>([]);
     const [colleagues, setColleagues] = useState<User[]>([]);
     const [adminUser, setAdminUser] = useState<User | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -330,6 +336,13 @@ const TeacherDashboard: React.FC = () => {
         }
     }, [user]);
 
+    const fetchDeletedExams = useCallback(async () => {
+        if (user) {
+            const data = await getDeletedExamsForTeacher(user.id);
+            setDeletedExams(data);
+        }
+    }, [user]);
+
     const fetchHallTemplates = useCallback(async () => {
         if (user) {
             const data = await getHallTemplatesForTeacher(user.id);
@@ -341,6 +354,13 @@ const TeacherDashboard: React.FC = () => {
         if (user) {
             const data = await getStudentSetTemplatesForTeacher(user.id);
             setStudentSetTemplates(data);
+        }
+    }, [user]);
+
+    const fetchSeatingTemplates = useCallback(async () => {
+        if (user) {
+            const data = await getSeatingTemplatesForTeacher(user.id);
+            setSeatingTemplates(data);
         }
     }, [user]);
     
@@ -355,7 +375,7 @@ const TeacherDashboard: React.FC = () => {
         const loadInitialData = async () => {
              if (user?.permissionGranted) {
                 setIsLoading(true);
-                await Promise.all([fetchExams(), fetchHallTemplates(), fetchStudentSetTemplates(), fetchColleagues()]);
+                await Promise.all([fetchExams(), fetchDeletedExams(), fetchHallTemplates(), fetchStudentSetTemplates(), fetchSeatingTemplates(), fetchColleagues()]);
                 
                 // Fetch Admin to get Institution Name
                 if (user.adminId) {
@@ -369,7 +389,7 @@ const TeacherDashboard: React.FC = () => {
             }
         }
        loadInitialData();
-    }, [fetchExams, fetchHallTemplates, fetchStudentSetTemplates, fetchColleagues, user]);
+    }, [fetchExams, fetchHallTemplates, fetchStudentSetTemplates, fetchSeatingTemplates, fetchColleagues, user]);
 
     const getCreatorName = (id: string) => {
         if(id === user?.id) return 'Me';
@@ -1137,9 +1157,51 @@ const TeacherDashboard: React.FC = () => {
         if (!name) return;
         try {
             await createSeatingTemplateFromExam(activeExam.id, name, user.id);
+            await fetchSeatingTemplates();
             setFormWarning(`Saved seating plan as template "${name}".`);
         } catch (error: any) {
             setFormError(error.message || 'Unable to save seating template.');
+        }
+    };
+
+    const handleUseSeatingTemplate = (template: SeatingPlanTemplate) => {
+        if (!user) return;
+        const clonedHalls = JSON.parse(JSON.stringify(template.halls || []));
+        const clonedStudentSets = JSON.parse(JSON.stringify(template.studentSets || []));
+        const clonedSeatingPlan = JSON.parse(JSON.stringify(template.seatingPlan || {}));
+        setActiveExam({
+            ...initialNewExamState,
+            id: '',
+            title: `${template.title || template.name}`,
+            date: '',
+            halls: clonedHalls,
+            studentSets: clonedStudentSets,
+            seatingPlan: clonedSeatingPlan,
+            createdBy: user.id,
+            adminId: user.adminId || '',
+            instituteId: template.instituteId,
+            sourceTemplateId: template.id,
+            session: template.session || 'Morning',
+            startTime: template.startTime || '',
+            editorMode: template.editorMode || 'ai',
+            seatingType: template.seatingType || 'normal',
+            aiSeatingRules: template.aiSeatingRules || '',
+            autoDeleteSeatingAfterExam: template.autoDeleteSeatingAfterExam ?? true,
+            status: 'DRAFT',
+        });
+        setFormError('');
+        setFormWarning(`Loaded template "${template.name}". Please set the date, time, and adjust anything you need before saving.`);
+    };
+
+    const handleDeleteSeatingTemplate = async (templateId: string, templateName: string) => {
+        if (!user) return;
+        if (!window.confirm(`Delete seating template "${templateName}" permanently?`)) return;
+        try {
+            await deleteSeatingTemplate(templateId, user.id, user.role);
+            await fetchSeatingTemplates();
+            setFormWarning(`Deleted seating template "${templateName}".`);
+        } catch (error: any) {
+            setFormError(error.message || 'Unable to delete seating template.');
         }
     };
 
@@ -1428,13 +1490,24 @@ const TeacherDashboard: React.FC = () => {
 
     const handleDeleteExam = async (examId: string) => {
         if (!user) return;
-        if (window.confirm('Are you sure you want to permanently delete this exam? This action cannot be undone.')) {
+        if (window.confirm('Move this exam to recycle bin? It can be restored within 30 days.')) {
             setIsLoading(true);
             await deleteExam(examId, user.id, user.role);
             if (activeExam?.id === examId) {
                 setActiveExam(null);
             }
-            await fetchExams();
+            await Promise.all([fetchExams(), fetchDeletedExams()]);
+            setIsLoading(false);
+        }
+    };
+
+    const handleRestoreDeletedExam = async (examId: string) => {
+        if (!user) return;
+        setIsLoading(true);
+        try {
+            await restoreDeletedExam(examId, user.id, user.role);
+            await Promise.all([fetchExams(), fetchDeletedExams()]);
+        } finally {
             setIsLoading(false);
         }
     };
@@ -3387,6 +3460,28 @@ const TeacherDashboard: React.FC = () => {
                                     </div>
                                 ))}
                             </div>
+
+                            <div className="mt-8 border-t border-gray-200 dark:border-gray-700 pt-6">
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="font-semibold text-gray-800 dark:text-gray-200">Recycle Bin</h3>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">{deletedExams.length} deleted exams</span>
+                                </div>
+                                {deletedExams.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {deletedExams.map(exam => (
+                                            <div key={exam.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50/70 dark:bg-amber-900/10 dark:border-amber-900/30">
+                                                <div>
+                                                    <p className="font-medium text-gray-800 dark:text-gray-200">{exam.title}</p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400">Deleted {exam.deletedAt ? new Date(exam.deletedAt).toLocaleString() : 'recently'} • Restorable within 30 days</p>
+                                                </div>
+                                                <Button variant="secondary" size="sm" onClick={() => handleRestoreDeletedExam(exam.id)}>Restore</Button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">No deleted exams in recycle bin.</p>
+                                )}
+                            </div>
                         </Card>
                     </div>
 
@@ -3561,6 +3656,50 @@ const TeacherDashboard: React.FC = () => {
                                                     <UsersIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
                                                 </div>
                                                 <p className="text-sm text-gray-500 dark:text-gray-400">No student set templates</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <h3 className="font-semibold text-gray-800 dark:text-gray-200">Saved Seating Templates</h3>
+                                        <span className="text-xs text-gray-500 dark:text-gray-400">{seatingTemplates.length} templates</span>
+                                    </div>
+                                    <div className="space-y-3">
+                                        {seatingTemplates.length > 0 ? seatingTemplates.map(template => (
+                                            <div key={template.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-1.5 bg-violet-100 dark:bg-violet-900/20 rounded">
+                                                        <TemplateIcon className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-medium text-gray-800 dark:text-gray-200 text-sm">{template.name}</p>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400">{template.halls.length} halls • {template.studentSets.length} student sets</p>
+                                                        <p className="text-[10px] text-gray-400 dark:text-gray-500">Saved {new Date(template.createdAt).toLocaleString()}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-1 self-end sm:self-auto">
+                                                    <button
+                                                        onClick={() => handleUseSeatingTemplate(template)}
+                                                        className="px-2.5 py-1.5 text-xs font-medium rounded bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:hover:bg-violet-900/30 transition-colors"
+                                                    >
+                                                        Use Template
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteSeatingTemplate(template.id, template.name)}
+                                                        className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                                                    >
+                                                        <TrashIcon className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )) : (
+                                            <div className="text-center py-6">
+                                                <div className="inline-flex items-center justify-center w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-full mb-3">
+                                                    <TemplateIcon className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                                                </div>
+                                                <p className="text-sm text-gray-500 dark:text-gray-400">No seating templates</p>
                                             </div>
                                         )}
                                     </div>

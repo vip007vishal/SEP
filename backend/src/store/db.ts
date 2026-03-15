@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { Pool, PoolClient } from "pg";
 import { env } from "../utils/env";
+import { hashPassword, isPasswordHashed } from "../utils/security";
 import { ApprovalStatus, AuditLog, Exam, HallTemplate, Institute, Role, SeatAssignment, SeatingPlanTemplate, SeatingPlanVersion, StudentSetTemplate, User } from "../types";
 
 export interface DbData {
@@ -78,7 +79,7 @@ const upsertSuperAdmin = async (client: PoolClient) => {
       env.superAdminName,
       env.superAdminEmail,
       Role.SUPER_ADMIN,
-      env.superAdminPassword,
+      isPasswordHashed(env.superAdminPassword) ? env.superAdminPassword : hashPassword(env.superAdminPassword),
       true,
       "APPROVED",
     ]
@@ -94,7 +95,7 @@ const mapUsers = async (client: PoolClient): Promise<User[]> => {
             institution_name AS "institutionName",
             institute_id AS "instituteId",
             approval_status AS "approvalStatus",
-            approval_reason AS "approvalReason"
+            approval_reason AS "approvalReason", reply_to_email AS "replyToEmail", failed_login_count AS "failedLoginCount", locked_until::text AS "lockedUntil"
      FROM users
      ORDER BY created_at ASC, id ASC`
   );
@@ -136,7 +137,8 @@ const mapExams = async (client: PoolClient): Promise<Exam[]> => {
             created_by AS "createdBy", admin_id AS "adminId", institute_id AS "instituteId",
             validation_report AS "validationReport", seating_plan_version AS "seatingPlanVersion",
             published_at::text AS "publishedAt", locked_at::text AS "lockedAt",
-            auto_delete_seating_after_exam AS "autoDeleteSeatingAfterExam", source_template_id AS "sourceTemplateId"
+            auto_delete_seating_after_exam AS "autoDeleteSeatingAfterExam", source_template_id AS "sourceTemplateId",
+            deleted_at::text AS "deletedAt", deleted_by AS "deletedBy"
      FROM exams
      ORDER BY exam_date ASC, created_at ASC, id ASC`
   );
@@ -177,7 +179,8 @@ const mapSeatingPlanVersions = async (client: PoolClient): Promise<SeatingPlanVe
 const mapSeatingTemplates = async (client: PoolClient): Promise<SeatingPlanTemplate[]> => {
   const { rows } = await client.query(
     `SELECT id, name, description, created_by AS "createdBy", admin_id AS "adminId", institute_id AS "instituteId", halls, student_sets AS "studentSets",
-            seating_plan AS "seatingPlan", source_exam_id AS "sourceExamId", created_at::text AS "createdAt"
+            seating_plan AS "seatingPlan", title, session, start_time AS "startTime", editor_mode AS "editorMode", seating_type AS "seatingType",
+            ai_seating_rules AS "aiSeatingRules", auto_delete_seating_after_exam AS "autoDeleteSeatingAfterExam", source_exam_id AS "sourceExamId", created_at::text AS "createdAt"
      FROM seating_templates
      ORDER BY created_at DESC`
   );
@@ -226,8 +229,8 @@ export const saveDb = async (db: DbData) => {
     for (const user of db.users || []) {
       if (user.role === Role.SUPER_ADMIN && user.id === "superadmin") continue;
       await client.query(
-        `INSERT INTO users (id, name, email, role, password, permission_granted, register_number, admin_id, institution_name, institute_id, approval_status, approval_reason)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        `INSERT INTO users (id, name, email, role, password, permission_granted, register_number, admin_id, institution_name, institute_id, approval_status, approval_reason, reply_to_email, failed_login_count, locked_until)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
           user.id,
           user.name,
@@ -241,6 +244,9 @@ export const saveDb = async (db: DbData) => {
           user.instituteId || null,
           user.approvalStatus || (user.permissionGranted ? 'APPROVED' : 'PENDING'),
           user.approvalReason || null,
+          user.replyToEmail || null,
+          user.failedLoginCount || 0,
+          user.lockedUntil || null,
         ]
       );
     }
@@ -263,8 +269,8 @@ export const saveDb = async (db: DbData) => {
 
     for (const exam of db.exams || []) {
       await client.query(
-        `INSERT INTO exams (id, title, exam_date, session, start_time, status, halls, student_sets, seating_plan, ai_seating_rules, seating_type, editor_mode, validation_report, seating_plan_version, published_at, locked_at, auto_delete_seating_after_exam, source_template_id, created_by, admin_id, institute_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21)`,
+        `INSERT INTO exams (id, title, exam_date, session, start_time, status, halls, student_sets, seating_plan, ai_seating_rules, seating_type, editor_mode, validation_report, seating_plan_version, published_at, locked_at, auto_delete_seating_after_exam, source_template_id, deleted_at, deleted_by, created_by, admin_id, institute_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`,
         [
           exam.id,
           exam.title,
@@ -284,6 +290,8 @@ export const saveDb = async (db: DbData) => {
           exam.lockedAt || null,
           exam.autoDeleteSeatingAfterExam ?? false,
           exam.sourceTemplateId || null,
+          exam.deletedAt || null,
+          exam.deletedBy || null,
           exam.createdBy,
           exam.adminId,
           exam.instituteId || null,
@@ -340,9 +348,9 @@ export const saveDb = async (db: DbData) => {
 
     for (const template of db.seatingTemplates || []) {
       await client.query(
-        `INSERT INTO seating_templates (id, name, description, created_by, admin_id, institute_id, halls, student_sets, seating_plan, source_exam_id, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11)`,
-        [template.id, template.name, template.description || null, template.createdBy, template.adminId, template.instituteId || null, JSON.stringify(template.halls || []), JSON.stringify(template.studentSets || []), JSON.stringify(template.seatingPlan || null), (template as any).sourceExamId || null, template.createdAt]
+        `INSERT INTO seating_templates (id, name, description, created_by, admin_id, institute_id, halls, student_sets, seating_plan, title, session, start_time, editor_mode, seating_type, ai_seating_rules, auto_delete_seating_after_exam, source_exam_id, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        [template.id, template.name, template.description || null, template.createdBy, template.adminId, template.instituteId || null, JSON.stringify(template.halls || []), JSON.stringify(template.studentSets || []), JSON.stringify(template.seatingPlan || null), template.title || null, template.session || null, template.startTime || null, template.editorMode || null, template.seatingType || null, template.aiSeatingRules || null, template.autoDeleteSeatingAfterExam ?? false, (template as any).sourceExamId || null, template.createdAt]
       );
     }
 

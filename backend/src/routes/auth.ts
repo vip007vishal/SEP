@@ -1,10 +1,43 @@
 import { Router } from "express";
 import { createAdminUser, createTeacherUser, findUserByEmail, loginStudent, persistDb, resetUserPassword } from "../services/examService";
+import { verifyPassword } from "../utils/security";
 import { clearOtp, generateOtp, setOtp, verifyOtp } from "../utils/otpStore";
 import { sendOtpMail } from "../utils/mailer";
 import { sanitizeUser } from "../utils/sanitize";
 
 const router = Router();
+
+const requestWindowMs = 10 * 60 * 1000;
+const maxOtpRequestsPerWindow = 3;
+const bruteForceWindowMs = 15 * 60 * 1000;
+const bruteForceMaxAttempts = 5;
+const otpRequests = new Map<string, number[]>();
+const failedLoginAttempts = new Map<string, number[]>();
+
+const allowOtpRequest = (key: string) => {
+  const now = Date.now();
+  const recent = (otpRequests.get(key) || []).filter((ts) => now - ts < requestWindowMs);
+  if (recent.length >= maxOtpRequestsPerWindow) return false;
+  recent.push(now);
+  otpRequests.set(key, recent);
+  return true;
+};
+
+const recordFailedLogin = (key: string) => {
+  const now = Date.now();
+  const recent = (failedLoginAttempts.get(key) || []).filter((ts) => now - ts < bruteForceWindowMs);
+  recent.push(now);
+  failedLoginAttempts.set(key, recent);
+  return recent.length;
+};
+
+const clearFailedLogin = (key: string) => failedLoginAttempts.delete(key);
+const isLoginBlocked = (key: string) => {
+  const now = Date.now();
+  const recent = (failedLoginAttempts.get(key) || []).filter((ts) => now - ts < bruteForceWindowMs);
+  failedLoginAttempts.set(key, recent);
+  return recent.length >= bruteForceMaxAttempts;
+};
 
 router.post("/request-otp", async (req, res) => {
   try {
@@ -15,14 +48,22 @@ router.post("/request-otp", async (req, res) => {
 
     if (!email || !password) return res.status(400).json({ error: "Email and password are required." });
 
+    const loginKey = `${email}:LOGIN`;
+    if (isLoginBlocked(loginKey)) {
+      return res.status(429).json({ error: 'Too many failed login attempts. Please wait 15 minutes and try again.' });
+    }
     const user = await findUserByEmail(email);
-    if (!user || String(user.password ?? "").trim() !== password) {
+    if (!user || !verifyPassword(password, user.password)) {
+      recordFailedLogin(loginKey);
       return res.status(401).json({ error: "Invalid credentials." });
     }
     if ((user.role === "ADMIN" || user.role === "TEACHER") && !user.permissionGranted) {
       return res.status(403).json({ error: user.role === "ADMIN" ? `Account ${user.approvalStatus || 'Pending'}: ${user.approvalReason || 'A Super Admin must approve your institutional registration.'}` : `Account ${user.approvalStatus || 'Pending'}: ${user.approvalReason || 'Your institutional administrator must grant you permission.'}` });
     }
 
+    if (!allowOtpRequest(loginKey)) {
+      return res.status(429).json({ error: 'OTP resend limit reached. Please wait a few minutes before trying again.' });
+    }
     const otp = generateOtp();
     await setOtp(user.email, otp, 'LOGIN');
     await sendOtpMail(user.email, otp);
@@ -42,14 +83,17 @@ router.post("/verify-otp", async (req, res) => {
 
     if (!email || !password || !otp) return res.status(400).json({ error: "Email, password and OTP are required." });
 
+    const loginKey = `${email}:LOGIN`;
     const user = await findUserByEmail(email);
-    if (!user || String(user.password ?? "").trim() !== password) {
+    if (!user || !verifyPassword(password, user.password)) {
       await clearOtp(email, 'LOGIN');
+      recordFailedLogin(loginKey);
       return res.status(401).json({ error: "Invalid credentials." });
     }
     const verified = await verifyOtp(email, otp, 'LOGIN');
     if (!verified.valid) return res.status(401).json({ error: "Invalid or expired verification code." });
 
+    clearFailedLogin(loginKey);
     return res.json({ user: sanitizeUser(user) });
   } catch (error: any) {
     return res.status(500).json({ error: error.message || "Unable to verify verification code." });
@@ -106,6 +150,10 @@ router.post('/request-password-reset', async (req, res) => {
     const user = await findUserByEmail(email);
     if (!user || !['ADMIN', 'TEACHER'].includes(user.role)) {
       return res.status(404).json({ error: 'Admin or teacher account not found.' });
+    }
+    const resetKey = `${email}:PASSWORD_RESET`;
+    if (!allowOtpRequest(resetKey)) {
+      return res.status(429).json({ error: 'OTP resend limit reached. Please wait a few minutes before trying again.' });
     }
     const otp = generateOtp();
     await setOtp(user.email, otp, 'PASSWORD_RESET', { newPassword });
